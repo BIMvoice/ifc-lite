@@ -3751,7 +3751,7 @@
     "resolveEntityLengthUnitScale: function",
     "resolveEntityNameAlias: function",
     "resolveMaterialDefId: function",
-    "resolveOwningProjectId: function",
+    "resolveOwningIfcProjectId: function",
     "scanIfcEntities: function",
     "secondsToIso8601Duration: function",
     "serializeScheduleToStep: function",
