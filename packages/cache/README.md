@@ -2,6 +2,8 @@
 
 Binary cache format for IFClite. Caches the parsed data store and geometry in a compact binary format so a previously-loaded IFC reopens in milliseconds instead of re-running the full parse + tessellation pipeline. Content-addressable (xxHash64 of the source IFC), so cache invalidation is automatic.
 
+**Properties and quantities are not part of that speedup.** `BinaryCacheWriter.write` serializes whatever the data store's property/quantity tables already hold. A STEP-parsed store resolves properties lazily on demand and never populates those tables, so a cache written straight from a STEP parse round-trips with EMPTY property/quantity tables — a cache-restored model queries properties exactly as slow as a fresh parse (see `docs/guide/querying.md`). If your application needs fast repeat property queries too, retain the source buffer alongside the cache entry and re-attach on-demand extraction on read, the way the viewer's cache hook does.
+
 ## Installation
 
 ```bash
@@ -15,6 +17,7 @@ import {
   xxhash64Hex,
   BinaryCacheReader,
   BinaryCacheWriter,
+  toCacheDataStore,
 } from '@ifc-lite/cache';
 
 const ifcBuffer = await file.arrayBuffer();
@@ -31,11 +34,15 @@ if (cached) {
 
 // Cold path — full parse + tessellation, then write the cache.
 // dataStore comes from the parser; process() returns a GeometryResult.
-const dataStore = await parser.parseColumnar(new Uint8Array(ifcBuffer));
+// parseColumnar takes the raw ArrayBuffer, not a Uint8Array view of it.
+const dataStore = await parser.parseColumnar(ifcBuffer);
 const geometry = await geometryProcessor.process(new Uint8Array(ifcBuffer));
 
 const writer = new BinaryCacheWriter();
-const cacheBuffer = await writer.write(dataStore, geometry, ifcBuffer, { includeGeometry: true });
+// toCacheDataStore adapts the parser's IfcDataStore (string `schemaVersion`)
+// to the CacheDataStore shape write() requires (numeric `schema` enum) —
+// see the note above about what it does and does not carry over.
+const cacheBuffer = await writer.write(toCacheDataStore(dataStore), geometry, ifcBuffer, { includeGeometry: true });
 await myStorage.put(cacheKey, cacheBuffer);
 ```
 
