@@ -6459,12 +6459,20 @@
     "QueryInterface: class",
     "QueryResultEntity: class",
     "SQLResult: interface",
+    "SelectorFilter: type",
+    "SelectorOp: type",
+    "SelectorParseError: interface",
+    "SelectorParseResult: type",
+    "SelectorQuery: interface",
+    "SelectorText: type",
+    "SelectorValue: type",
     "compareFilterValue: function",
     "findAllPropertiesInSets: function",
     "findAllQuantitiesInSets: function",
     "findPropertyInSets: function",
     "findQuantityInSets: function",
-    "normalizeBooleanValue: function"
+    "normalizeBooleanValue: function",
+    "parseSelector: function"
   ],
   "@ifc-lite/renderer": [
     "AdapterInfoSnapshot: interface",
