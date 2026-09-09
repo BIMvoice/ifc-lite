@@ -2222,7 +2222,7 @@ export function useIfcLoader() {
       // and a `dispose()` placed after the last statement would miss all of
       // them. The free itself still waits on the parse chain; see
       // createGeometryProcessorDisposer.
-      try { appearanceLoad?.finish(useViewerStore.getState().models.has(modelId) && (target.kind === 'federated' || (useViewerStore.getState().geometryResult?.meshes.length ?? 0) > 0)); }
+      try { appearanceLoad?.finishForModel(useViewerStore.getState().models.get(modelId)); }
       finally { geometryHandle?.release(); }
     }
   }, [setLoading, setGeometryStreamingActive, setError, setProgress, setIfcDataStore, setGeometryResult, appendGeometryBatch, appendInstancedShards, updateMeshColors, updateCoordinateInfo, loadFromCache, saveToCache, loadFromServer, revalidateSourceDecoupledHit]);

@@ -134,12 +134,15 @@ it('registers authored uses only on Apply, preserves shared commands through und
   const owner = { kind: 'history' as const, id: 'history' };
   const asset = await inventory.add(png(), { owner });
   const uri = models.getAuthoredUri('model', asset.id);
+  assert.equal(models.hasResources('model'), false);
   assert.equal(models.exportResources('model').resources.size, 0);
   models.registerAuthored('model', 'first', [asset.id]);
   models.registerAuthored('model', 'second', [asset.id]);
   models.unregisterAuthored('model', 'first');
+  assert.equal(models.hasResources('model'), true);
   assert.deepEqual(models.exportResources('model').resources.get(uri), png());
   models.unregisterAuthored('model', 'second');
+  assert.equal(models.hasResources('model'), false);
   assert.equal(models.exportResources('model').resources.size, 0);
   assert.ok(inventory.get(asset.id), 'history retains bytes for redo');
   models.registerAuthored('model', 'first', [asset.id]);
@@ -212,4 +215,31 @@ it('surfaces archive decode budget failures instead of publishing partially text
   load.finish(false);
   assert.equal(bitmap.closes, 1);
   assert.equal(models.exportResources('over-budget').resources.size, 0);
+});
+
+// #4243 independent review: source ownership must not depend on flat geometry.
+it('keeps metadata-only and instanced-only IFC originals, but releases failed placeholders', async () => {
+  const bitmap = image();
+  const models = new ModelAppearanceAssets(new AppearanceAssetInventory({ decode: async () => bitmap }));
+  const metadata = { ...fixtureModel('metadata'), geometryResult: null };
+  const point = { x: 0, y: 0, z: 0 };
+  const bounds = { min: point, max: point };
+  const instanced = { ...fixtureModel('instanced'), geometryResult: {
+    meshes: [], totalVertices: 3, totalTriangles: 1, instancedGeometryHashes: new Map([[1, 1n]]),
+    coordinateInfo: { originShift: point, originalBounds: bounds, shiftedBounds: bounds, hasLargeCoordinates: false },
+  } };
+  const failed = { ...fixtureModel('failed'), ifcDataStore: null, geometryResult: null };
+  useViewerStore.setState(fixtureModels(metadata, instanced, failed));
+  // Global geometry belongs to another active model; finalization must resolve its own.
+  useViewerStore.setState({ activeModelId: 'failed', geometryResult: null });
+  for (const id of ['metadata', 'instanced', 'failed', 'removed']) {
+    const load = models.begin(id);
+    await load.decode(archive());
+    load.finishForModel(useViewerStore.getState().models.get(id));
+    assert.equal(models.hasResources(id), id === 'metadata' || id === 'instanced');
+    assert.equal(models.exportOriginals(id).resources.size, id === 'metadata' || id === 'instanced' ? 1 : 0);
+  }
+  models.clear();
+  assert.equal(bitmap.closes, 1, 'failed placeholders and removed models must not leak a pending source owner');
+  useViewerStore.getState().clearAllModels();
 });

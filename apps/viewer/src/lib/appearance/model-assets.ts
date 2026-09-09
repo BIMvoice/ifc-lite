@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import type { IfcDataStore } from '@ifc-lite/parser';
 import { AppearanceAssetInventory, AppearanceAssetError, type AppearanceBitmap } from './assets.js';
 
 interface ArchiveImages {
@@ -66,7 +67,11 @@ export class ModelAppearanceAssets<B extends AppearanceBitmap = ImageBitmap> {
         }
         return bitmaps.size ? bitmaps : null;
       },
-      /** Retain only while a loaded model (including visible partial geometry) owns it. */
+      /** Model-local parsed source remains exportable without any flat meshes. */
+      finishForModel: (model: { ifcDataStore: IfcDataStore | null } | undefined) => {
+        lease.finish(model?.ifcDataStore != null);
+      },
+      /** Retain only while a loaded model owns it. */
       finish: (modelExists: boolean) => {
         if (finished) return;
         if (modelExists) {
@@ -86,6 +91,13 @@ export class ModelAppearanceAssets<B extends AppearanceBitmap = ImageBitmap> {
     };
     this.pending.set(modelId, lease);
     return lease;
+  }
+
+  /** Cheap output-label hint; exportResources still validates readiness/completeness. */
+  hasResources(modelId: string): boolean {
+    if (this.models.get(modelId)?.paths.size) return true;
+    for (const ids of this.authored.get(modelId)?.values() ?? []) if (ids.size) return true;
+    return false;
   }
 
   /** The IFC entry must keep modelPath so its relative URLReferences resolve. */
