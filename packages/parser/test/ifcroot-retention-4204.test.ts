@@ -84,3 +84,57 @@ describe('#4204 — the parser retains those entities in the EntityTable', () =>
     expect(store.entities.getName(14)).toBe('Pset_Template');
   });
 });
+
+// The schema-derived `isSubtypeOfAny(upper, ROOT_TYPES)` check does not
+// fully subsume the old `IFCREL` name-prefix test it replaced — only for
+// entities the bundled schema registry actually resolves. Two shapes fall
+// through it and rely on the restored `upper.startsWith('IFCREL')`
+// fallback to stay retained:
+const IFC_LEXICAL_FALLBACK = `#1=IFCOWNERHISTORY($,$,$,$,$,$,$,0);
+#20=IFCRELAXATION(500.,300.);
+#21=IFCRELVENDOREXTENSIONTEST('vendor-attribute',$,$);`;
+
+async function parseLexicalFallback() {
+  const source = new TextEncoder().encode(IFC_LEXICAL_FALLBACK);
+  const tokenizer = new StepTokenizer(source);
+  const entityRefs = Array.from(tokenizer.scanEntitiesFast()).map((ref) => ({
+    expressId: ref.expressId,
+    type: ref.type,
+    byteOffset: ref.offset,
+    byteLength: ref.length,
+    lineNumber: ref.line,
+  }));
+  const parser = new ColumnarParser();
+  return parser.parseLite(source.buffer.slice(0), entityRefs, {});
+}
+
+describe('#4204 regression — the IFCREL lexical fallback is NOT subsumed by the schema-derived check', () => {
+  it('IfcRelaxation is a real IFC2X3 entity that is NOT an IfcRoot descendant', () => {
+    // entities-ifc2x3.ts: { name: "IfcRelaxation", parent: undefined,
+    // source: "Ifc2x3.MaterialPropertyResource" } — a prestressing/
+    // material-property resource, not a relationship, and its chain never
+    // reaches IFCROOT. It only ever matched the old rule lexically.
+    const chain = getInheritanceChain('IfcRelaxation').map((c) => c.toUpperCase());
+    expect(chain).not.toContain('IFCROOT');
+  });
+
+  it('retains IfcRelaxation via the lexical fallback, not the schema-derived check', async () => {
+    const store = await parseLexicalFallback();
+    expect(store.entities.getTypeName(20)).toBe('IfcRelaxation');
+  });
+
+  it('a vendor IFCREL* extension absent from the schema registry has no resolvable inheritance chain', () => {
+    // Unknown to every bundled schema: getInheritanceChainFromSchemaUnion
+    // returns null and the getInheritanceChainForEntity fallback returns
+    // [], so isSubtypeOfAny is false for it no matter what ROOT_TYPES holds.
+    expect(getInheritanceChain('IFCRELVENDOREXTENSIONTEST')).toEqual([]);
+  });
+
+  it('retains an unrecognized vendor IFCREL* extension via the lexical fallback', async () => {
+    // Absent from IFC_ENTITY_NAMES (the generated PascalCase map), so the
+    // raw UPPERCASE STEP name is echoed back unchanged — retention (not
+    // name casing) is what this test is proving.
+    const store = await parseLexicalFallback();
+    expect(store.entities.getTypeName(21)).toBe('IFCRELVENDOREXTENSIONTEST');
+  });
+});

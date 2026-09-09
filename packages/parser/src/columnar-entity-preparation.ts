@@ -22,8 +22,14 @@ export type ColumnarEntityInput = EntityRef[] | ScannedEntityColumns;
 // no error (#4204). IFCWALL is a stand-in for "the registry loaded and its
 // inheritance chain reaches the root at all", not a claim about walls
 // specifically.
+//
+// Exported (only) so `test/root-derivation-guard-4204.test.ts` can call it
+// directly against a mocked `ifc-schema.js` and prove the throw path
+// actually fires — the module-level `rootDerivationVerified` latch means a
+// real parse elsewhere in the same test file would otherwise make this a
+// permanent no-op.
 let rootDerivationVerified = false;
-function assertRootDerivationIsLive(): void {
+export function assertRootDerivationIsLive(): void {
   if (rootDerivationVerified) return;
   const chain = getInheritanceChain('IFCWALL').map(c => c.toUpperCase());
   if (!chain.includes('IFCROOT')) {
@@ -85,9 +91,23 @@ export async function prepareColumnarEntities(
   // IfcCostItem, IfcResource, IfcStructural*, IfcProjectLibrary,
   // IfcPropertySetTemplate, …) fell through to CAT_SKIP and stayed
   // unaddressable: `getGlobalId`/`getTypeName` answered '' / 'Unknown' for
-  // them (#4204). IfcRelationship is itself an IfcRoot subtype, so testing
-  // the inheritance chain against IFCROOT directly makes the prefix test
-  // redundant too — this one rule replaces both.
+  // them (#4204).
+  //
+  // IfcRelationship is itself an IfcRoot subtype, so for every entity the
+  // schema registry actually knows, `isSubtypeOfAny(upper, ROOT_TYPES)`
+  // alone covers what the old `IFCREL` prefix test covered. But it does
+  // NOT fully subsume that test lexically: `IfcRelaxation` is a real
+  // IFC2X3 entity (a prestressing/material-property resource, not a
+  // relationship — `entities-ifc2x3.ts` records `parent: undefined,
+  // source: "Ifc2x3.MaterialPropertyResource"`) that happens to start
+  // with "IfcRel" and matched the old rule lexically without ever being
+  // an IfcRoot descendant. And any name absent from the bundled registry
+  // — a vendor extension such as `IfcRelSomethingCustom` — makes
+  // `getInheritanceChain` return `[]`, so the schema-derived check alone
+  // answers `false` for it even though the old lexical test retained it.
+  // Keep both: the schema-derived check for its added coverage, the
+  // `IFCREL` prefix as the safety net for names the registry can't
+  // resolve.
   const ROOT_TYPES = new Set(['IFCROOT']);
 
   // IfcGroup family (IfcZone, IfcSystem, IfcDistributionSystem,
@@ -129,6 +149,7 @@ export async function prepareColumnarEntities(
       else if (
           RELEVANT_NON_PRODUCT_HELPERS.has(upper)
           || isSubtypeOfAny(upper, ROOT_TYPES)
+          || upper.startsWith('IFCREL')
       ) cat = CAT_RELEVANT;
       else cat = CAT_SKIP;
       typeCategoryCache.set(type, cat);
