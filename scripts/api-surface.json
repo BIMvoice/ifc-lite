@@ -2868,6 +2868,14 @@
     "serializeValue: function",
     "toStepLine: function"
   ],
+  "@ifc-lite/codegen/schema-hierarchy": [
+    "HierarchyEntity: interface",
+    "HierarchyRegistry: interface",
+    "isProperSubtypeOf: function",
+    "isProperSubtypeOfAny: function",
+    "isSubtypeOf: function",
+    "isSubtypeOfAny: function"
+  ],
   "@ifc-lite/collab": [
     "AGENT_PALETTE: const",
     "AgentIdentity: interface",
@@ -4168,6 +4176,7 @@
     "StepExporter: class",
     "Vec3: type",
     "applySimplifiedGeometry: function",
+    "captureAppearanceDependencies: function",
     "collectReferencedEntityIds: function",
     "collectRelatedEntities: function",
     "collectStyleEntities: function",
@@ -4187,7 +4196,8 @@
     "isParquet: function",
     "needsConversion: function",
     "parseGLB: function",
-    "parseGLBToMeshData: function"
+    "parseGLBToMeshData: function",
+    "planAuthoredResourceCleanup: function"
   ],
   "@ifc-lite/extensions": [
     "ACTION_INTENTS: const",
@@ -5128,6 +5138,9 @@
     "EffectiveChange: interface",
     "EffectiveChangeKind: type",
     "EntityIdentityResolver: interface",
+    "EntityOperation: type",
+    "EntityOperationEffect: type",
+    "EntityPreparationOptions: interface",
     "EntityTypeMutation: interface",
     "EntityTypeNormalizer: type",
     "FilterOperator: type",
@@ -5146,6 +5159,7 @@
     "MutationType: type",
     "NewEntity: interface",
     "OVERLAY_BYTE_OFFSET: const",
+    "PreparedEntityOperations: interface",
     "PropertyExtractor: type",
     "PropertyFilter: interface",
     "PropertyMapping: interface",
@@ -6510,6 +6524,10 @@
   ],
   "@ifc-lite/renderer": [
     "AdapterInfoSnapshot: interface",
+    "AppearanceChange: interface",
+    "AppearanceOwner: interface",
+    "AppearancePreview: interface",
+    "AppearanceToken: interface",
     "BVH: class",
     "BatchedMesh: interface",
     "Bounds3: interface",
@@ -6627,6 +6645,8 @@
     "decideTimingMode: function",
     "decodePickSample: function",
     "deriveSkyGradient: function",
+    "equivalentAppearanceGeometry: function",
+    "expandAppearanceCorners: function",
     "federationRegistry: const",
     "frameTotalMs: function",
     "hasTimestampQueryFeature: function",

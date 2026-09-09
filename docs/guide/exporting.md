@@ -2,6 +2,29 @@
 
 Guide to exporting IFC data in various formats.
 
+## Textured IFC in the web viewer
+
+Normal IFC exports, visible subsets, and Export Changes package retained image
+resources into `.ifczip` automatically. The archive preserves original PNG/JPEG
+bytes, the IFC entry directory, and relative texture paths; authored images use
+content-addressed filenames. Untextured models continue to download as `.ifc`.
+SDK IFC exports and Export Changes omit unreachable appearance resources
+created by tracked commands, while the original session keeps those rows and
+images for Undo/Redo. Imported resources are preserved; this is not general
+cleanup of orphan entities from another authoring session.
+The serialization helper prepares an uncommitted atomic view and preserves the
+live allocator watermark. It still copies overlay/history arrays temporarily;
+compact output does not imply lower peak memory. Reopened formerly active image
+rows become imported source and remain outside authored-only cleanup.
+Export is unavailable while images load and refuses missing or budget-omitted resources
+rather than producing an apparently complete textureless file.
+
+Merged textured-model export currently requires texture URL remapping and is
+unavailable. Export each model separately to preserve its appearance. Subset
+archives may retain unused images from their source model. The STEP subset
+closure retains inverse texture maps for included faces, including maps created
+or retargeted through pending edits.
+
 ## Quick Start: CDN Export (No Build Required)
 
 Export IFC to GLB directly in the browser with zero setup:
@@ -789,6 +812,23 @@ await saveFile('entities.csv', csv);
 
 - [Query Guide](querying.md) - Filter data before export
 - [API Reference](../api/typescript.md) - Complete API docs
+
+STEP exports from an IFCXML archive keep the model entry’s directory but use an
+`.ifc` suffix, so archive filenames agree with the serialized format.
+
+### Cleaning up authored appearance resources
+
+`planAuthoredResourceCleanup(dataStore, mutationView, candidateIds, protectedValues)` returns `{ entityIds, retainedImageUris }`: a deletion plan for explicitly owned, overlay-created appearance resource entities plus the effective image URLs that survive it. It follows the same effective positional and named reference overrides as STEP export. Source-backed resources, entities outside the candidate set, and live inverse style/texture bindings are retained. The URI set includes independent/source image entities that copy an authored URL, even after its original image entity is removed. Values and references use the existing STEP serializers, retype and attribute-override helpers, with positional overrides taking precedence as they do in the exported file. The optional `protectedValues` iterable carries entity references and saved attribute values needed by Undo/Redo; these references keep the corresponding resource graph alive.
+
+The helper is pure: apply `entityIds` through an atomic mutation transaction, then release image bytes only after that transaction succeeds. Reconcile outside history publication and advance the model revision after deletion. It refuses oversized candidate/reference walks without returning a partial plan. This is authored-resource housekeeping, not a general imported-model cleanup pass. Non-candidate entities establish roots first; only reachable candidate payloads are read. Thus a large unreachable history-only UV array can be omitted without consuming the live-reference budget. A reached payload still receives the same depth, value, reference and byte checks. For serialization, callers can omit history protection and apply the resulting deletions to a detached atomic view without committing it; image packaging must preserve originals and include authored URLs from `retainedImageUris`, without releasing any live leases.
+
+### Validating appearance dependencies before replay
+
+`captureAppearanceDependencies(dataStore, mutationView, rootEntityIds)` returns a guard with `validate(currentMutationView)`. Capture the before/after views while preparing an appearance command, then validate the corresponding expected state before Undo/Redo changes IFC or GPU resources. The guard compares effective STEP records reached through geometry, placement and appearance references, including overlay-created chains and inverse `IfcStyledItem`/texture-map attachments. It uses the existing STEP writers and reference scanner, so positional overrides retain the same precedence as export. Unrelated property-set edits do not invalidate the command.
+
+Validation is synchronous, bounded and conservative: a changed record, dependency set, or exceeded work/byte budget throws before replay. Formatting-equivalent rewrites may also require refreshing the command. Source data is assumed immutable within a model; replacement models require new guards. Capture once per command state, not during rendering. Viewer preview planning additionally needs a snapshot-time overlay checkpoint across its asynchronous export/worker interval; a replay dependency guard is not a replacement for that checkpoint.
+
+The guard caps the source index at 200,000 entities before constructing its effective index, authored overlay entities at 100,000, traversed records at 100,000, references at two million and authored values at eight million. Exact UTF-8 accounting uses a fixed scratch buffer before allocating each encoded row. Its 192 MiB effective-row budget covers the planner's bounded 128 MiB source plus 64 MiB output, including higher-precision newly authored UVs. Immutable source records retain identity markers rather than duplicate large source strings in every history checkpoint. Material/type inheritance and material-definition representations are included; sharing a type or material does not pull peer products' geometry into the guard.
 
 ### IFCX texture portability
 
