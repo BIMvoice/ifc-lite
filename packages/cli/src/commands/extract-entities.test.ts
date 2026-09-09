@@ -1139,3 +1139,44 @@ describe('triage (--detect) WASM disposal (#1959 P2 leak)', () => {
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   }, 30_000);
 });
+
+describe('extract-entities --detect --report --json: --top', () => {
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  afterEach(() => {
+    stdoutSpy?.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  /** Runs the triage JSON path and returns the parsed `top` array. */
+  async function runTriage(extraArgs: string[]): Promise<unknown[]> {
+    const writes: string[] = [];
+    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    await extractEntitiesCommand([SAMPLE_IFC, '--detect', '--report', '--json', ...extraArgs]);
+    const parsed = JSON.parse(writes.join(''));
+    return parsed.top;
+  }
+
+  it('falls back to the default 20-row --top on a non-numeric value, not an empty array', async () => {
+    const baseline = await runTriage([]);
+    stdoutSpy.mockRestore();
+    const withBadTop = await runTriage(['--top', 'banana']);
+
+    // A NaN --top must behave exactly like omitting --top, not silently
+    // return zero rows (Array.prototype.slice(0, NaN) collapses to 0).
+    expect(baseline.length).toBeGreaterThan(0);
+    expect(withBadTop).toEqual(baseline);
+  }, 30_000);
+
+  it('still honors an ordinary numeric --top', async () => {
+    const baseline = await runTriage([]);
+    stdoutSpy.mockRestore();
+    const withTopOne = await runTriage(['--top', '1']);
+
+    expect(baseline.length).toBeGreaterThan(1);
+    expect(withTopOne).toEqual(baseline.slice(0, 1));
+  }, 30_000);
+});
