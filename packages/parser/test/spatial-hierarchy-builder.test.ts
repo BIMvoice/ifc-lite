@@ -472,4 +472,117 @@ describe('SpatialHierarchyBuilder', () => {
     expect(hierarchy.project.children[0].name).toBe('01');
     expect(hierarchy.project.children[0].longName).toBeUndefined();
   });
+
+  describe('ambiguousStorey (#4311)', () => {
+    it('flags an element with two direct ContainsElements edges naming different storeys', () => {
+      const strings = new StringTable();
+      const entities = new EntityTableBuilder(4, strings);
+      entities.add(1, 'IFCPROJECT', 'p0', 'Project', '', '');
+      entities.add(2, 'IFCBUILDINGSTOREY', 's0', 'Storey A', '', '');
+      entities.add(3, 'IFCBUILDINGSTOREY', 's1', 'Storey B', '', '');
+      entities.add(4, 'IFCWALL', 'w0', 'Wall', '', '', true);
+
+      const relationships = new RelationshipGraphBuilder();
+      relationships.addEdge(1, 2, RelationshipType.Aggregates, 100);
+      relationships.addEdge(1, 3, RelationshipType.Aggregates, 101);
+      // Two DIFFERENT storeys both directly contain the same wall — genuinely
+      // ambiguous, unlike a repeated declaration of the same edge.
+      relationships.addEdge(2, 4, RelationshipType.ContainsElements, 200);
+      relationships.addEdge(3, 4, RelationshipType.ContainsElements, 201);
+
+      const hierarchy = new SpatialHierarchyBuilder().build(
+        entities.build(),
+        relationships.build(),
+        strings,
+        new Uint8Array(),
+        { byId: { get: () => undefined } },
+      );
+
+      // elementToStorey still resolves to exactly one storey (tie-break
+      // unchanged by this issue) - the new part is that the ambiguity itself
+      // is now visible.
+      expect(hierarchy.elementToStorey.get(4)).toBeDefined();
+      expect(hierarchy.ambiguousStorey).toBeDefined();
+      expect(hierarchy.ambiguousStorey!.has(4)).toBe(true);
+    });
+
+    it('does NOT flag an element directly contained by only one storey (the ordinary case)', () => {
+      // The important half of this pair: a signal that fires on an everyday,
+      // unambiguous model is worse than no signal at all.
+      const strings = new StringTable();
+      const entities = new EntityTableBuilder(4, strings);
+      entities.add(1, 'IFCPROJECT', 'p0', 'Project', '', '');
+      entities.add(2, 'IFCBUILDINGSTOREY', 's0', 'Storey A', '', '');
+      entities.add(3, 'IFCBUILDINGSTOREY', 's1', 'Storey B', '', '');
+      entities.add(4, 'IFCWALL', 'w0', 'Wall', '', '', true);
+
+      const relationships = new RelationshipGraphBuilder();
+      relationships.addEdge(1, 2, RelationshipType.Aggregates, 100);
+      relationships.addEdge(1, 3, RelationshipType.Aggregates, 101);
+      relationships.addEdge(2, 4, RelationshipType.ContainsElements, 200);
+
+      const hierarchy = new SpatialHierarchyBuilder().build(
+        entities.build(),
+        relationships.build(),
+        strings,
+        new Uint8Array(),
+        { byId: { get: () => undefined } },
+      );
+
+      expect(hierarchy.elementToStorey.get(4)).toBe(2);
+      expect(hierarchy.ambiguousStorey).toBeDefined();
+      expect(hierarchy.ambiguousStorey!.has(4)).toBe(false);
+      expect(hierarchy.ambiguousStorey!.size).toBe(0);
+    });
+
+    it('does NOT flag an element whose only duplicate is the SAME storey declared twice', () => {
+      // Two IfcRelContainedInSpatialStructure instances naming the identical
+      // (storey, element) pair collapse to one edge before this ever runs
+      // (RelationshipGraphBuilder's source/target/type dedupe) - so this
+      // fixture also proves the dedupe, not just the flag.
+      const strings = new StringTable();
+      const entities = new EntityTableBuilder(3, strings);
+      entities.add(1, 'IFCPROJECT', 'p0', 'Project', '', '');
+      entities.add(2, 'IFCBUILDINGSTOREY', 's0', 'Storey A', '', '');
+      entities.add(3, 'IFCWALL', 'w0', 'Wall', '', '', true);
+
+      const relationships = new RelationshipGraphBuilder();
+      relationships.addEdge(1, 2, RelationshipType.Aggregates, 100);
+      relationships.addEdge(2, 3, RelationshipType.ContainsElements, 200);
+      relationships.addEdge(2, 3, RelationshipType.ContainsElements, 201); // redundant IfcRel
+
+      const hierarchy = new SpatialHierarchyBuilder().build(
+        entities.build(),
+        relationships.build(),
+        strings,
+        new Uint8Array(),
+        { byId: { get: () => undefined } },
+      );
+
+      expect(hierarchy.byStorey.get(2)).toEqual([3]);
+      expect(hierarchy.ambiguousStorey!.has(3)).toBe(false);
+    });
+
+    it('flags on the cache-restore path too (no source buffer needed)', () => {
+      const strings = new StringTable();
+      const entities = new EntityTableBuilder(4, strings);
+      entities.add(1, 'IFCPROJECT', 'p0', 'Project', '', '');
+      entities.add(2, 'IFCBUILDINGSTOREY', 's0', 'Storey A', '', '');
+      entities.add(3, 'IFCBUILDINGSTOREY', 's1', 'Storey B', '', '');
+      entities.add(4, 'IFCWALL', 'w0', 'Wall', '', '', true);
+
+      const relationships = new RelationshipGraphBuilder();
+      relationships.addEdge(1, 2, RelationshipType.Aggregates, 100);
+      relationships.addEdge(1, 3, RelationshipType.Aggregates, 101);
+      relationships.addEdge(2, 4, RelationshipType.ContainsElements, 200);
+      relationships.addEdge(3, 4, RelationshipType.ContainsElements, 201);
+
+      const hierarchy = new SpatialHierarchyBuilder().buildFromCache(
+        entities.build(),
+        relationships.build(),
+      )!;
+
+      expect(hierarchy.ambiguousStorey!.has(4)).toBe(true);
+    });
+  });
 });
