@@ -17,10 +17,13 @@ import { getGeomWorkerOverride, resolveLoadTessellationTier, isMeshOnlyCacheEnab
 import { buildModelLoadedGeometryProps, warnGeometryDiagnostics } from './modelLoadedGeometryProps.js';
 import { planCacheWrite, decideMeshOnlyCacheHit, decideSourceTierCacheHit, decideCacheLoadOutcome } from './cacheTier.js';
 import { buildModelLoadReportPatch, type ModelLoadReportFields } from '../lib/loadReport';
+import { identifyLoadedPlacementSource } from '@/lib/model-placement/loaded-source-identity';
+import { placementSourceIdentity } from '@/lib/model-placement/source-identity';
 import { computeSourceFingerprint } from './sourceFingerprint.js';
 import { computeFullSourceHash } from '../utils/sourceContentHash.js';
 import { IfcParser, detectFormat, unwrapIfcZipWithResources, type IfcDataStore } from '@ifc-lite/parser';
-import { decodeTextureResources, attachTextureBitmaps, type TextureBitmapStore } from '../utils/textureResources.js';
+import { attachTextureBitmaps, type TextureBitmapStore } from '../utils/textureResources.js';
+import { modelAppearanceAssets } from '../lib/appearance/model-assets.js';
 import { WorkerParser } from '@ifc-lite/parser/browser';
 import { memoryAccounting } from '../lib/perf/memoryAccounting.js';
 import {
@@ -411,6 +414,7 @@ export function useIfcLoader() {
      * stays null for those.
      */
     let geometryHandle: GeometryProcessorDisposer | null = null;
+    let appearanceLoad: ReturnType<typeof modelAppearanceAssets.begin> | undefined;
 
     /**
      * Resource-limit recovery, shared by BOTH failure paths.
@@ -666,7 +670,7 @@ export function useIfcLoader() {
           const federatedModel: FederatedModel = {
             id: modelId,
             name: target.name ?? file.name,
-            sourceFingerprint: modelSourceIdentity,
+            sourceFingerprint: modelSourceIdentity, sourceContentHash: placementIdentity,
             ifcDataStore: dataStore,
             geometryResult,
             visible: target.visible ?? true,
@@ -776,18 +780,16 @@ export function useIfcLoader() {
       if (!pointCloudFormat) {
         const zipContents = await unwrapIfcZipWithResources(buffer);
         buffer = zipContents.model;
-        // #1781: decode sibling texture images (IfcImageTexture targets) once,
-        // up front — mesh batches attach the shared bitmaps synchronously as
-        // they arrive. Empty/no-zip loads resolve to null and pay nothing.
-        textureBitmaps = await decodeTextureResources(zipContents.resources);
-        if (textureBitmaps) {
-          console.log(`[useIfc] Decoded ${textureBitmaps.size} .ifcZIP texture image(s)`);
-        }
+        // Retain original archive paths/encoded bytes alongside shared bitmaps.
+        appearanceLoad = modelAppearanceAssets.begin(modelId);
+        textureBitmaps = await appearanceLoad.decode(zipContents);
       }
 
       const sourceKeyFingerprint = computeSourceFingerprint(buffer);
       const modelSourceIdentity = `${file.name}:${sourceKeyFingerprint.hex}`;
-      if (target.kind === 'primary') updateModel(modelId, { sourceFingerprint: modelSourceIdentity });
+      const placementIdentity = pointCloudFormat ? undefined : await placementSourceIdentity(file, () => loadSessionRef.current !== currentSession);
+      if (loadSessionRef.current !== currentSession) return;
+      if (target.kind === 'primary') updateModel(modelId, { sourceFingerprint: modelSourceIdentity, sourceContentHash: placementIdentity });
       // IFCX/IFC5 vs IFC4 STEP vs GLB resolved from the full buffer; point
       // cloud format was already resolved from the head slice above.
       const format = pointCloudFormat ?? detectFormat(buffer);
@@ -973,6 +975,7 @@ export function useIfcLoader() {
         await finalizeModel(ingest.dataStore, ingest.geometryResult, ingest.schemaVersion, {
           pointCloudHandleId: ingest.rendererHandle.id, loadPath: 'point-cloud',
         });
+        void identifyLoadedPlacementSource(modelId, file);
         setProgress({ phase: 'Complete', percent: 100 });
         // Snapshot: points, not meshes - the ingest GeometryResult's zero
         // triangle/mesh totals are placeholders, not measurements, so only the
@@ -1070,12 +1073,8 @@ export function useIfcLoader() {
         }
       }
 
-      // Cache key = size + spread-sampled content fingerprint + format version.
-      // The fingerprint (`sourceFingerprint.ts`) hashes a ~160KB spread (head +
-      // tail + interior windows) plus the exact byte length, so a key match is
-      // itself the validation — a genuinely different file can't key the same
-      // entry. `.hash` is reused as the cache header's `sourceHash` so the write
-      // path never pays a full-file hash either.
+      // The sampled cache key is a lookup hint, validated by the mtime/full
+      // hash gates below. Placement matching uses its separate full identity.
       // Snapshot the merge-layers flag *before* the cache lookup: it is a
       // load-time WASM tessellation input (issue #540) and must discriminate
       // the cache key, otherwise toggling it + reloading serves geometry built
@@ -1378,15 +1377,14 @@ export function useIfcLoader() {
       // Default path: parser runs in a Web Worker via WorkerParser, both
       // workers + main share the same SharedArrayBuffer source, and the
       // main thread never blocks on parse.
-      // Fallback: in-process IfcParser.parseColumnar (the previous default)
-      // — used when cross-origin isolation is missing or the worker spawn
-      // fails (auto-fallback inside the catch).
+      // Fall back to main-thread parsing when isolation or worker startup fails.
       let resolveDataStore: (dataStore: IfcDataStore) => void;
       let rejectDataStore: (err: unknown) => void;
       const dataStorePromise = new Promise<IfcDataStore>((resolve, reject) => {
         resolveDataStore = resolve;
         rejectDataStore = reject;
       });
+      if (target.kind === 'primary') void appearanceLoad?.finishAfter(dataStorePromise, () => useViewerStore.getState().models.get(modelId));
 
       const onPartialDataStore = (partialStore: IfcDataStore) => {
         if (loadSessionRef.current !== currentSession) return;
@@ -2052,6 +2050,7 @@ export function useIfcLoader() {
                   });
                 }
               });
+              if (target.kind === 'federated') void appearanceLoad?.finishAfter(finalizePromise, () => useViewerStore.getState().models.get(modelId));
               break;
           }
         }
@@ -2224,7 +2223,8 @@ export function useIfcLoader() {
       // and a `dispose()` placed after the last statement would miss all of
       // them. The free itself still waits on the parse chain; see
       // createGeometryProcessorDisposer.
-      geometryHandle?.release();
+      try { appearanceLoad?.finishForModel(useViewerStore.getState().models.get(modelId)); }
+      finally { geometryHandle?.release(); }
     }
   }, [setLoading, setGeometryStreamingActive, setError, setProgress, setIfcDataStore, setGeometryResult, appendGeometryBatch, appendInstancedShards, updateMeshColors, updateCoordinateInfo, loadFromCache, saveToCache, loadFromServer, revalidateServedCacheHit]);
 
