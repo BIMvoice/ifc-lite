@@ -24,11 +24,7 @@ import { ToolErrorCode, ToolExecutionError } from '../errors.js';
 import { resolveSafePath } from '../safe-path.js';
 import type { ToolContext } from '../context.js';
 import { buildIdsAccessor } from './ids-accessor.js';
-
-// Local shape for a drop-census class entry, matching the fields this file
-// reads off `store.dropCensus`'s `ClassCensusEntry` (see @ifc-lite/parser's
-// drop-census.ts).
-type CensusClassLike = { type: string; scanned: number };
+import { buildDropCensusIssues, dropCensusJson } from './drop-census-issues.js';
 
 const idsValidate: Tool = {
   name: 'ids_validate',
@@ -282,44 +278,10 @@ const modelAudit: Tool = {
     // 4. Semantic drop census (#4208): classes the loader silently skipped.
     // dropCensus is only absent for a store built by a path that doesn't
     // compute one (e.g. a cache-restored store) — surface that explicitly
-    // rather than rendering it the same as "nothing was dropped".
+    // rather than rendering it the same as "nothing was dropped". Issue
+    // construction lives in drop-census-issues.ts (module-size split).
     const dropCensus = m.store.dropCensus;
-    if (dropCensus) {
-      if (dropCensus.skippedClasses.length > 0) {
-        issues.push({
-          severity: 'warning',
-          category: 'semantic-drop',
-          rule: 'skipped-class',
-          entityCount: dropCensus.totalSkipped,
-          message: `${dropCensus.skippedClasses.length} class(es) fell to CAT_SKIP and never entered the entity table (${dropCensus.totalSkipped.toLocaleString()} record(s)): ${dropCensus.skippedClasses.slice(0, 10).map((c: CensusClassLike) => c.type).join(', ')}${dropCensus.skippedClasses.length > 10 ? ', …' : ''}.`,
-        });
-      }
-      if (dropCensus.unknownClasses.length > 0) {
-        issues.push({
-          severity: 'warning',
-          category: 'semantic-drop',
-          rule: 'unknown-class',
-          entityCount: dropCensus.unknownClasses.reduce((n: number, c: CensusClassLike) => n + c.scanned, 0),
-          message: `${dropCensus.unknownClasses.length} class(es) are not recognised by the schema registry: ${dropCensus.unknownClasses.slice(0, 10).map((c: CensusClassLike) => c.type).join(', ')}${dropCensus.unknownClasses.length > 10 ? ', …' : ''}.`,
-        });
-      }
-      if (dropCensus.unindexedRelClasses.length > 0) {
-        issues.push({
-          severity: 'info',
-          category: 'semantic-drop',
-          rule: 'unindexed-rel-class',
-          entityCount: dropCensus.unindexedRelClasses.reduce((n: number, c: CensusClassLike) => n + c.scanned, 0),
-          message: `${dropCensus.unindexedRelClasses.length} IFCREL* class(es) were seen but not indexed as relationship-graph edges: ${dropCensus.unindexedRelClasses.slice(0, 10).map((c: CensusClassLike) => c.type).join(', ')}${dropCensus.unindexedRelClasses.length > 10 ? ', …' : ''}.`,
-        });
-      }
-    } else {
-      issues.push({
-        severity: 'info',
-        category: 'semantic-drop',
-        rule: 'census-unavailable',
-        message: 'Semantic drop census did not run for this model (no dropCensus on the store) — skipped/unknown classes cannot be reported.',
-      });
-    }
+    issues.push(...buildDropCensusIssues(dropCensus));
 
     // Lighthouse-style category scores: % of entities that pass each category check.
     const scores = {
@@ -335,19 +297,7 @@ const modelAudit: Tool = {
         scores,
         issues,
         totals: { products: totalProducts, unnamed, duplicateGlobalIds: duplicates },
-        dropCensus: dropCensus
-          ? {
-              ran: true,
-              totalScanned: dropCensus.totalScanned,
-              totalRetained: dropCensus.totalRetained,
-              totalSkipped: dropCensus.totalSkipped,
-              skippedClasses: dropCensus.skippedClasses,
-              unknownClasses: dropCensus.unknownClasses,
-              relClassesSeen: dropCensus.relClassesSeen,
-              relClassesIndexed: dropCensus.relClassesIndexed,
-              unindexedRelClasses: dropCensus.unindexedRelClasses,
-            }
-          : { ran: false },
+        dropCensus: dropCensusJson(dropCensus),
         ...pendingMutationsField(overlay),
       },
     );

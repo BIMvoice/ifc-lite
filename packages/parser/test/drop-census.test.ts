@@ -46,7 +46,14 @@ describe('drop census (#4208)', () => {
         const census = store.dropCensus!;
 
         expect(census.totalScanned).toBe(3);
-        expect(census.totalSkipped).toBeGreaterThanOrEqual(1);
+        // Both IFCOWNERHISTORY and IFCPERSON fall to CAT_SKIP here (neither
+        // is spatial/geometry/relationship/product/group), leaving only the
+        // wall retained. Pinned as an exact count, not >=1: mutating
+        // `totalRetained: totalScanned - totalSkipped` to
+        // `totalRetained: totalScanned` would report 3, not 1, and this
+        // assertion is the only place in the suite that would catch it.
+        expect(census.totalSkipped).toBe(2);
+        expect(census.totalRetained).toBe(1);
 
         const person = census.skippedClasses.find(c => c.type === 'IFCPERSON');
         expect(person).toBeDefined();
@@ -54,6 +61,13 @@ describe('drop census (#4208)', () => {
         expect(person!.retained).toBe(0);
         expect(person!.category).toBe('skip');
         expect(person!.knownInSchema).toBe(true);
+
+        // IFCPERSON has no GlobalId and is not an IfcRoot descendant — it is
+        // an *expected* skip (a resource record), not the kind of drop this
+        // census exists to alarm on.
+        expect(person!.isRootDescendant).toBe(false);
+        expect(census.expectedSkippedClasses.some(c => c.type === 'IFCPERSON')).toBe(true);
+        expect(census.unexpectedSkippedClasses.some(c => c.type === 'IFCPERSON')).toBe(false);
 
         // The wall is retained and must not appear in skippedClasses.
         expect(census.skippedClasses.some(c => c.type === 'IFCWALLSTANDARDCASE')).toBe(false);
@@ -83,6 +97,14 @@ describe('drop census (#4208)', () => {
         expect(census.relClassesSeen).toBeGreaterThanOrEqual(1);
         const rel = census.unindexedRelClasses.find(c => c.type === 'IFCRELASSIGNSTOPROCESS');
         expect(rel).toBeDefined();
+
+        // Exactly one IFCREL* class was seen and it was NOT indexed, so
+        // relClassesIndexed must be 0. Pinned as an exact value: mutating
+        // `relClassesIndexed: input.relSeenTypes.size - input.relUnindexedTypes.size`
+        // to `relClassesIndexed: input.relSeenTypes.size` would report 1
+        // instead of 0, and no other assertion in this suite reads the field.
+        expect(census.relClassesSeen).toBe(1);
+        expect(census.relClassesIndexed).toBe(0);
     });
 
     it('reports zero drops honestly (not the same shape as "did not run")', async () => {
@@ -105,11 +127,43 @@ describe('drop census (#4208)', () => {
         expect(census!.unknownClasses).toEqual([]);
     });
 
+    it('splits skippedClasses into expected (no GlobalId) vs unexpected (IfcRoot descendant)', () => {
+        // Pure unit test of buildDropCensus's own split logic, independent of
+        // which real IFC classes the parser currently routes to CAT_SKIP.
+        const census = buildDropCensus({
+            scannedByType: new Map([
+                ['IFCCARTESIANPOINT', 5],
+                ['IFCSURPRISINGLYDROPPEDPRODUCT', 2],
+            ]),
+            categoryByType: new Map([
+                ['IFCCARTESIANPOINT', 'skip'],
+                ['IFCSURPRISINGLYDROPPEDPRODUCT', 'skip'],
+            ]),
+            knownByType: new Map([
+                ['IFCCARTESIANPOINT', true],
+                ['IFCSURPRISINGLYDROPPEDPRODUCT', true],
+            ]),
+            rootDescendantByType: new Map([
+                ['IFCCARTESIANPOINT', false],
+                ['IFCSURPRISINGLYDROPPEDPRODUCT', true],
+            ]),
+            relSeenTypes: new Set(),
+            relUnindexedTypes: new Set(),
+        });
+
+        expect(census.skippedClasses.map(c => c.type).sort()).toEqual(
+            ['IFCCARTESIANPOINT', 'IFCSURPRISINGLYDROPPEDPRODUCT'].sort(),
+        );
+        expect(census.expectedSkippedClasses.map(c => c.type)).toEqual(['IFCCARTESIANPOINT']);
+        expect(census.unexpectedSkippedClasses.map(c => c.type)).toEqual(['IFCSURPRISINGLYDROPPEDPRODUCT']);
+    });
+
     it('buildDropCensus is total over an empty input (never throws, still ran:true)', () => {
         const census = buildDropCensus({
             scannedByType: new Map(),
             categoryByType: new Map(),
             knownByType: new Map(),
+            rootDescendantByType: new Map(),
             relSeenTypes: new Set(),
             relUnindexedTypes: new Set(),
         });
@@ -117,5 +171,7 @@ describe('drop census (#4208)', () => {
         expect(census.totalScanned).toBe(0);
         expect(census.totalRetained).toBe(0);
         expect(census.byClass).toEqual([]);
+        expect(census.expectedSkippedClasses).toEqual([]);
+        expect(census.unexpectedSkippedClasses).toEqual([]);
     });
 });

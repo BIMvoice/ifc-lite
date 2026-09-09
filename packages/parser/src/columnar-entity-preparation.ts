@@ -136,6 +136,7 @@ export async function prepareColumnarEntities(
   const censusScannedByType = new Map<string, number>();
   const censusCategoryByType = new Map<string, DropCategory>();
   const censusKnownByType = new Map<string, boolean>();
+  const censusRootDescendantByType = new Map<string, boolean>();
   const censusRelSeenTypes = new Set<string>();
   const censusRelUnindexedTypes = new Set<string>();
 
@@ -154,6 +155,14 @@ export async function prepareColumnarEntities(
       censusScannedByType.set(censusTypeKey, 1);
       censusCategoryByType.set(censusTypeKey, CAT_LABELS[cat]);
       censusKnownByType.set(censusTypeKey, isKnownType(censusTypeKey));
+      // Same inheritance walk `isSubtypeOfAny` uses above, reused here to
+      // tell "a resource record with no GlobalId" (never IfcRoot) apart
+      // from "an entity with its own identity that still got dropped" —
+      // see ClassCensusEntry.isRootDescendant in drop-census.ts.
+      censusRootDescendantByType.set(
+        censusTypeKey,
+        getInheritanceChain(censusTypeKey).some(ancestor => ancestor.toUpperCase() === 'IFCROOT'),
+      );
       if (censusTypeKey.startsWith('IFCREL')) {
         censusRelSeenTypes.add(censusTypeKey);
         if (cat !== CAT_HIERARCHY_REL && cat !== CAT_PROPERTY_REL && cat !== CAT_ASSOCIATION_REL) {
@@ -204,6 +213,7 @@ export async function prepareColumnarEntities(
     scannedByType: censusScannedByType,
     categoryByType: censusCategoryByType,
     knownByType: censusKnownByType,
+    rootDescendantByType: censusRootDescendantByType,
     relSeenTypes: censusRelSeenTypes,
     relUnindexedTypes: censusRelUnindexedTypes,
   });

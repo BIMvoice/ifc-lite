@@ -54,6 +54,11 @@ export async function infoCommand(args: string[]): Promise<void> {
         totalRetained: dropCensus.totalRetained,
         totalSkipped: dropCensus.totalSkipped,
         skippedClasses: dropCensus.skippedClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
+        // Split so a JSON consumer doesn't have to re-derive "is this a real
+        // regression or universal geometry noise" itself — see
+        // ClassCensusEntry.isRootDescendant in @ifc-lite/parser's drop-census.ts.
+        expectedSkippedClasses: dropCensus.expectedSkippedClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
+        unexpectedSkippedClasses: dropCensus.unexpectedSkippedClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
         unknownClasses: dropCensus.unknownClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned })),
         relClassesSeen: dropCensus.relClassesSeen,
         relClassesIndexed: dropCensus.relClassesIndexed,
@@ -139,11 +144,22 @@ export async function infoCommand(args: string[]): Promise<void> {
       + `${dropCensusSummary.totalRetained.toLocaleString()} retained, `
       + `${dropCensusSummary.totalSkipped.toLocaleString()} skipped.\n`
     );
-    if (dropCensusSummary.skippedClasses.length > 0) {
-      process.stdout.write(`  Skipped classes:\n`);
+    if (dropCensusSummary.unexpectedSkippedClasses.length > 0) {
+      // Classes with a GlobalId (IfcRoot descendants) that fell to CAT_SKIP
+      // anyway — the shape of a real regression, not routine geometry noise.
+      process.stdout.write(`  Skipped classes with a GlobalId (unexpected):\n`);
       process.stdout.write(formatTable(
         ['Type', 'Count', 'In schema'],
-        dropCensusSummary.skippedClasses.map((c: { type: string; scanned: number; knownInSchema: boolean }) => [c.type, c.scanned.toLocaleString(), c.knownInSchema ? 'yes' : 'no']),
+        dropCensusSummary.unexpectedSkippedClasses.map((c: { type: string; scanned: number; knownInSchema: boolean }) => [c.type, c.scanned.toLocaleString(), c.knownInSchema ? 'yes' : 'no']),
+      ).split('\n').map(l => '    ' + l).join('\n') + '\n');
+    }
+    if (dropCensusSummary.expectedSkippedClasses.length > 0) {
+      // Geometry/placement/style resource classes with no GlobalId — this
+      // fires on nearly every file and is not, by itself, a problem.
+      process.stdout.write(`  Skipped classes with no GlobalId (expected — geometry/placement/style resources):\n`);
+      process.stdout.write(formatTable(
+        ['Type', 'Count', 'In schema'],
+        dropCensusSummary.expectedSkippedClasses.map((c: { type: string; scanned: number; knownInSchema: boolean }) => [c.type, c.scanned.toLocaleString(), c.knownInSchema ? 'yes' : 'no']),
       ).split('\n').map(l => '    ' + l).join('\n') + '\n');
     }
     if (dropCensusSummary.unindexedRelClasses.length > 0) {

@@ -51,6 +51,21 @@ export interface ClassCensusEntry {
     category: DropCategory;
     /** Whether the type is recognised by the bundled IFC2X3/IFC4/IFC4X3 schema registry. */
     knownInSchema: boolean;
+    /**
+     * Whether the type's EXPRESS inheritance chain includes `IfcRoot` — i.e.
+     * whether instances of this class carry a `GlobalId` and are addressable
+     * as first-class entities. Geometry/placement/style resource classes
+     * (`IfcCartesianPoint`, `IfcAxis2Placement3D`, `IfcIndexedPolygonalFace`,
+     * …) are never `IfcRoot` descendants and are *expected* to fall to
+     * `CAT_SKIP` on every real IFC file — tessellated geometry alone can
+     * outnumber every other record in the file. An `IfcRoot` descendant
+     * falling to `CAT_SKIP` is a different story: it has an identity the
+     * model author gave it, and dropping it is the kind of regression this
+     * census exists to catch (see the `skipped-class` vs
+     * `skipped-class-expected` split this field drives in
+     * `@ifc-lite/mcp`'s `validation.ts` and `@ifc-lite/cli`'s `info.ts`).
+     */
+    isRootDescendant: boolean;
 }
 
 export interface DropCensus {
@@ -68,6 +83,22 @@ export interface DropCensus {
     byClass: ClassCensusEntry[];
     /** Subset of `byClass` with category `skip`. */
     skippedClasses: ClassCensusEntry[];
+    /**
+     * Subset of `skippedClasses` that are NOT `IfcRoot` descendants — records
+     * with no `GlobalId` (geometry, placement, and style resources). This
+     * bucket fires on essentially every real IFC file and is not, by itself,
+     * evidence of a problem.
+     */
+    expectedSkippedClasses: ClassCensusEntry[];
+    /**
+     * Subset of `skippedClasses` that ARE `IfcRoot` descendants — a class
+     * with its own identity (`GlobalId`) that nonetheless never entered the
+     * entity table. This is the subset worth alarming on: it is the shape of
+     * the #4208 `IfcCovering`-fell-out-of-`GEOMETRY_TYPES` incident
+     * (documented in `columnar-entity-preparation.ts`), not universal
+     * tessellation noise.
+     */
+    unexpectedSkippedClasses: ClassCensusEntry[];
     /** Subset of `byClass` not recognised by the schema registry at all. */
     unknownClasses: ClassCensusEntry[];
     /** Count of distinct `IFCREL*` classes seen on the wire. */
@@ -85,6 +116,12 @@ export interface DropCensusInput {
     categoryByType: Map<string, DropCategory>;
     /** Whether each uppercase STEP type is known to the schema registry. */
     knownByType: Map<string, boolean>;
+    /**
+     * Whether each uppercase STEP type's inheritance chain includes
+     * `IfcRoot`. Drives the `expectedSkippedClasses` /
+     * `unexpectedSkippedClasses` split — see {@link ClassCensusEntry.isRootDescendant}.
+     */
+    rootDescendantByType: Map<string, boolean>;
     /** Distinct `IFCREL*` uppercase types seen. */
     relSeenTypes: Set<string>;
     /** Distinct `IFCREL*` uppercase types seen but not indexed as an edge. */
@@ -113,11 +150,14 @@ export function buildDropCensus(input: DropCensusInput): DropCensus {
             retained,
             category,
             knownInSchema: input.knownByType.get(type) ?? false,
+            isRootDescendant: input.rootDescendantByType.get(type) ?? false,
         });
     }
     byClass.sort((a, b) => b.scanned - a.scanned || a.type.localeCompare(b.type));
 
     const skippedClasses = byClass.filter(c => c.category === 'skip');
+    const expectedSkippedClasses = skippedClasses.filter(c => !c.isRootDescendant);
+    const unexpectedSkippedClasses = skippedClasses.filter(c => c.isRootDescendant);
     const unknownClasses = byClass.filter(c => !c.knownInSchema);
     const unindexedRelClasses = byClass.filter(c => input.relUnindexedTypes.has(c.type));
 
@@ -128,6 +168,8 @@ export function buildDropCensus(input: DropCensusInput): DropCensus {
         totalSkipped,
         byClass,
         skippedClasses,
+        expectedSkippedClasses,
+        unexpectedSkippedClasses,
         unknownClasses,
         relClassesSeen: input.relSeenTypes.size,
         relClassesIndexed: input.relSeenTypes.size - input.relUnindexedTypes.size,
