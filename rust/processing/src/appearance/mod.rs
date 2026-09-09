@@ -5,6 +5,7 @@
 //! geometry changes. Plans are applied atomically by the host mutation editor.
 mod budget;
 mod canonical;
+mod context;
 mod mapping;
 mod source;
 mod texture_budget;

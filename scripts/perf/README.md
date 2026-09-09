@@ -920,3 +920,9 @@ found unchanged ordered mesh fingerprints and no observed ordinary-load timing
 regression. This is a regression verdict, not a browser speedup claim. Keep
 projection work in a cancellable worker and bound aggregate output as well as
 input: a shared coordinate list can otherwise multiply into many UV arrays.
+
+The planner must also resolve load-time RTC and material-layer context once per
+request. Comparing two equally misconfigured routers can falsely certify empty
+georeferenced triangles or an unsliced layer-bearing product; topology equality
+alone is not proof of agreement with reopening. This context work stays on the
+opt-in planner path and does not change ordinary load callers.

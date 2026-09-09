@@ -522,7 +522,14 @@ with loading and returns both IFC edit operations and per-corner preview data.
 It does not mutate the input. `AppearanceRequest` supplies an IFC4/IFC4X3 schema,
 revision token, reserved allocator watermark, product IDs, relative image URI
 and an existing-UV, planar or box mapping. The initial scope is direct, unshared
-`IfcTriangulatedFaceSet` Body geometry. Plans report unsupported products;
+`IfcTriangulatedFaceSet` Body geometry with absent or complete `IfcLocalPlacement`
+chains. `IfcGridPlacement` and `IfcLinearPlacement`, including local placements
+parented to them, remain explicitly unsupported in every mapping mode; canonical
+load-time placement recovery is not sufficient validation for writing edits.
+Products with sliceable material-layer associations are also excluded, because
+reopening may replace their face set with layer slices. Canonical comparisons
+resolve the shared load-time RTC metadata before meshing georeferenced geometry.
+Plans report unsupported products;
 callers must explicitly accept a reduced scope, retain image resources and
 apply the complete IFC edit plan atomically after revalidating the revision and
 allocator. Preview consumers validate source topology and map triangle corners,

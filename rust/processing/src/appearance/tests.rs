@@ -469,3 +469,40 @@ fn issue_4243_per_item_coordinate_limit_exhausts_the_whole_plan_budget() {
     assert!(boundary.reserve(MAX_COORDINATE_ROWS, 1, 3).is_ok());
     assert!(!boundary.exhausted);
 }
+
+#[test]
+fn issue_4272_georeferenced_topology_matches_canonical_reopen() {
+    let source = CONTROLLED_IFC.replace("#4=IFCCARTESIANPOINT((0.,0.,0.));", "#4=IFCCARTESIANPOINT((5000000.,6000000.,0.));")
+        .replace("(1.,0.,0.)", "(0.01,0.,0.)")
+        .replace("(0.,1.,0.)", "(0.,0.01,0.)")
+        .replace("(0.,0.,1.)", "(0.,0.,0.01)");
+    let plan = plan_appearance(source.as_bytes(), &request(vec![10, 30])).unwrap();
+    assert!(plan.exclusions.is_empty(), "{:?}", plan.exclusions);
+    assert_eq!(plan.items.len(), 2);
+    let before = crate::process_geometry(source.as_bytes());
+    let output = apply(&source, &plan);
+    let after = crate::process_geometry(output.as_bytes());
+    for item in &plan.items {
+        let old = before.meshes.iter().find(|m| m.express_id == item.product_id).unwrap();
+        let new = after.meshes.iter().find(|m| m.express_id == item.product_id).unwrap();
+        assert_eq!(item.source_indices, old.indices);
+        assert_eq!(item.target_indices, new.indices);
+        assert_eq!(item.preview_corner_uvs, corner_uvs(new));
+        assert_eq!(old.indices.len(), if item.product_id == 10 { 12 } else { 3 });
+    }
+}
+
+#[test]
+fn issue_4272_layer_slicing_is_explicitly_excluded_before_authoring() {
+    let layers = "#40=IFCMATERIAL('Finish',$,$);\n#41=IFCMATERIALLAYER(#40,0.05,$,$,$,$,$);\n#42=IFCMATERIALLAYER(#40,0.2,$,$,$,$,$);\n#43=IFCMATERIALLAYERSET((#41,#42),$,$);\n#44=IFCMATERIALLAYERSETUSAGE(#43,.AXIS2.,.POSITIVE.,0.,$);\n#45=IFCRELASSOCIATESMATERIAL('0Proxy000000000000000a',$,$,$,(#10),#44);\n";
+    let source = CONTROLLED_IFC.replace("IFCBUILDINGELEMENTPROXY('1ProxyImageTexture000'", "IFCWALL('1ProxyImageTexture000'").replace("ENDSEC;\nEND-ISO-10303-21;", &format!("{layers}ENDSEC;\nEND-ISO-10303-21;"));
+    let mut decoder = EntityDecoder::new(source.as_bytes());
+    assert!(ifc_lite_geometry::MaterialLayerIndex::from_content(source.as_bytes(), &mut decoder).is_sliceable(10));
+    let plan = plan_appearance(source.as_bytes(), &request(vec![10])).unwrap();
+    assert!(plan.items.is_empty());
+    assert!(plan.created.is_empty());
+    assert!(plan.edits.is_empty());
+    assert!(plan.removed.is_empty());
+    assert_eq!(plan.exclusions.len(), 1);
+    assert!(plan.exclusions[0].reason.contains("Material-layer slicing"));
+}

@@ -7,7 +7,7 @@ use crate::element::{
     MeshProductionOptions,
 };
 use crate::types::mesh::MeshData;
-use ifc_lite_geometry::{GeometryRouter, ImageTextureRef, ResolvedTextureMap, TextureSource};
+use ifc_lite_geometry::{ ImageTextureRef, ResolvedTextureMap, TextureSource};
 use rustc_hash::FxHashMap;
 
 /// Raw tessellation is not the final vertex contract: placement/source welding
@@ -106,7 +106,11 @@ fn produce(
     if !scale.is_finite() || scale <= 0. {
         return Err("Invalid model length unit scale".into());
     }
-    let router = GeometryRouter::with_scale(scale);
+    let context = source.context.as_ref().ok_or("Missing canonical load context")?;
+    if context.layers.is_sliceable(product_id) {
+        return Err("Material-layer slicing is unsupported for appearance authoring".into());
+    }
+    let router = context.router();
     let voids = FxHashMap::default();
     let styles = FxHashMap::default();
     let colours = FxHashMap::default();

@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) const MAX_VALUES: usize = 8_000_000;
 pub(super) struct Source<'a> {
+    pub context: Option<super::context::Context>,
     pub decoder: EntityDecoder<'a>,
     pub types: BTreeMap<u32, IfcType>,
     pub incoming: BTreeMap<u32, BTreeSet<u32>>,
@@ -19,6 +20,7 @@ impl<'a> Source<'a> {
             return Err("Appearance source exceeds 128 MiB budget".into());
         }
         let mut source = Self {
+            context: None,
             decoder: EntityDecoder::new(bytes),
             types: BTreeMap::new(),
             incoming: BTreeMap::new(),
@@ -73,6 +75,7 @@ impl<'a> Source<'a> {
                 _ => {}
             }
         }
+        source.context = Some(super::context::Context::new(bytes, &mut source.decoder));
         Ok(source)
     }
     pub fn entity(&mut self, id: u32) -> Result<DecodedEntity, String> {
@@ -96,7 +99,7 @@ impl<'a> Source<'a> {
             }
             let placement = self.entity(id)?;
             if placement.ifc_type != IfcType::IfcLocalPlacement {
-                return Err("World projection requires local placements".into());
+                return Err("Appearance authoring currently supports only local placement chains".into());
             }
             let axes = self.entity(placement.get_ref(1).ok_or("Missing RelativePlacement")?)?;
             if !matches!(
