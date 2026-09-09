@@ -59,6 +59,8 @@ pub(super) fn align_source_corners(
         if old.indices.len() != new.indices.len()
             || old.origin != new.origin
             || uvs.len() != new.positions.len() / 3 * 2
+            || new.normals.len() != new.positions.len()
+            || new.normals.iter().any(|v| !v.is_finite())
         {
             return Err("Canonical geometry changed source corner correspondence".into());
         }
@@ -66,11 +68,17 @@ pub(super) fn align_source_corners(
             let a = a as usize * 3;
             let b = b as usize * 3;
             if old.positions.get(a..a + 3) != new.positions.get(b..b + 3)
-                || old.normals.get(a..a + 3) != new.normals.get(b..b + 3)
             {
                 return Err("Appearance would change canonical triangle geometry".into());
             }
         }
+        // UV seams participate in the canonical weld key. Removing a seam can
+        // select a different near-coplanar normal representative without moving
+        // any triangle. Ship that exact target shading instead of a tolerance.
+        item.target_corner_normals = new.indices.iter().flat_map(|&i| {
+            let i = i as usize * 3;
+            [new.normals[i], new.normals[i + 2], -new.normals[i + 1]]
+        }).collect();
         item.source_indices.clone_from(&old.indices);
         item.target_indices.clone_from(&new.indices);
         item.preview_corner_uvs = new

@@ -264,5 +264,6 @@ pub(super) fn map_item(
         source_indices: Vec::new(),
         target_indices: Vec::new(),
         preview_corner_uvs: Vec::new(),
+        target_corner_normals: Vec::new(),
     })
 }

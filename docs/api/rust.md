@@ -534,6 +534,11 @@ callers must explicitly accept a reduced scope, retain image resources and
 apply the complete IFC edit plan atomically after revalidating the revision and
 allocator. Preview consumers validate source topology and map triangle corners,
 rather than assuming vertex counts establish UV correspondence.
+`targetCornerNormals` carries final shading normals in renderer Y-up triangle-corner
+order (`[nx, nz, -ny]` from IFC). Removing UV seams can merge near-coplanar weld
+representatives and change shading normals while every triangle position remains
+identical. Preview installs these canonical target normals so its shading matches
+reopening; it must not retain the previous normals or relax position checks.
 
 
 ---

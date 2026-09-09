@@ -77,6 +77,10 @@ pub struct AppearanceItem {
     /// UV pairs in triangle-corner order, with GPU V flip. Fragment consumers
     /// remap canonical corner slots and expand seams without moving geometry.
     pub preview_corner_uvs: Vec<f32>,
+    /// Final canonical shading normals in triangle-corner order, converted from
+    /// IFC Z-up to renderer Y-up as [nx, nz, -ny], matching MeshDataJs.
+    /// UV-dependent welding may choose a different normal representative.
+    pub target_corner_normals: Vec<f32>,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

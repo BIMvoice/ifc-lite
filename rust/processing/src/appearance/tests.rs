@@ -308,6 +308,15 @@ fn issue_4243_optional_convento_walls() {
     );
     assert!(plan.exclusions.is_empty(), "{:?}", plan.exclusions);
     assert!(!plan.items.is_empty());
+    req.mapping = Mapping::Planar { frame: MappingFrame::World, origin: [0.;3], axis_u: [1.,0.,0.], axis_v: [0.,1.,0.], metres_per_tile: [1.,1.] };
+    let planar = plan_appearance(&bytes, &req).unwrap();
+    assert!(planar.exclusions.is_empty(), "{:?}", planar.exclusions);
+    assert_eq!(planar.items.len(), plan.items.len());
+    for item in &planar.items {
+        assert_eq!(item.target_corner_normals.len(), item.target_indices.len() * 3);
+        assert!(item.target_corner_normals.iter().all(|v| v.is_finite()));
+    }
+    eprintln!("Convento planar: {} products, {} items, {} exclusions", req.product_ids.len(), planar.items.len(), planar.exclusions.len());
 }
 
 fn corner_uvs(mesh: &crate::types::mesh::MeshData) -> Vec<f32> {
@@ -505,4 +514,36 @@ fn issue_4272_layer_slicing_is_explicitly_excluded_before_authoring() {
     assert!(plan.removed.is_empty());
     assert_eq!(plan.exclusions.len(), 1);
     assert!(plan.exclusions[0].reason.contains("Material-layer slicing"));
+}
+
+#[test]
+fn issue_4243_planar_uv_seam_merge_preserves_positions_and_canonical_target_shading() {
+    // Two nearly coplanar triangles share positions but start on different atlas
+    // seams. Planar mapping merges their quantized-normal weld representatives.
+    let source = CONTROLLED_IFC
+        .replace("#34=IFCTRIANGULATEDFACESET(#35,$,.F.,((1,2,3)),$);", "#34=IFCTRIANGULATEDFACESET(#35,$,.F.,((1,2,3),(4,5,6)),$);")
+        .replace("#35=IFCCARTESIANPOINTLIST3D(((0.,0.,5.),(1.,0.,5.),(0.,1.,5.)));", "#35=IFCCARTESIANPOINTLIST3D(((0.,0.,0.),(1.,0.,0.),(0.,1.,0.),(0.,0.,0.),(0.,1.,0.),(-1.,0.,0.0002)));")
+        .replace("#36=IFCTEXTUREVERTEXLIST(((0.,0.),(1.,0.),(0.,1.)));", "#36=IFCTEXTUREVERTEXLIST(((0.,0.),(1.,0.),(0.,1.),(0.5,0.5),(0.5,1.),(1.,1.)));")
+        .replace("#37=IFCINDEXEDTRIANGLETEXTUREMAP((#20),#34,#36,((3,2,1)));", "#37=IFCINDEXEDTRIANGLETEXTUREMAP((#20),#34,#36,((1,2,3),(4,5,6)));");
+    let mut req = request(vec![30]);
+    req.mapping = Mapping::Planar { frame: MappingFrame::Item, origin: [0.;3], axis_u: [1.,0.,0.], axis_v: [0.,1.,0.], metres_per_tile: [1.,1.] };
+    let plan = plan_appearance(source.as_bytes(), &req).unwrap();
+    assert!(plan.exclusions.is_empty(), "{:?}", plan.exclusions);
+    let before = crate::process_geometry(source.as_bytes());
+    let output = apply(&source, &plan);
+    let after = crate::process_geometry(output.as_bytes());
+    let old = before.meshes.iter().find(|m| m.express_id == 30).unwrap();
+    let new = after.meshes.iter().find(|m| m.express_id == 30).unwrap();
+    let corners = |values: &[f32], indices: &[u32]| -> Vec<f32> {
+        indices.iter().flat_map(|&i| values[i as usize*3..i as usize*3+3].iter().copied()).collect()
+    };
+    assert_eq!(corners(&old.positions, &old.indices), corners(&new.positions, &new.indices));
+    assert_ne!(corners(&old.normals, &old.indices), corners(&new.normals, &new.indices));
+    assert_eq!(plan.items[0].source_indices, old.indices);
+    assert_eq!(plan.items[0].target_indices, new.indices);
+    let target_normals: Vec<f32> = new.indices.iter().flat_map(|&i| {
+        let i = i as usize * 3;
+        [new.normals[i], new.normals[i+2], -new.normals[i+1]]
+    }).collect();
+    assert_eq!(plan.items[0].target_corner_normals, target_normals);
 }
