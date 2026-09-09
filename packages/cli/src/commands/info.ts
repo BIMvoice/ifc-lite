@@ -12,11 +12,7 @@ import { loadIfcFile } from '../loader.js';
 import { printJson, formatTable, hasFlag, fatal } from '../output.js';
 import { EntityNode } from '@ifc-lite/query';
 import { IFC_ENTITY_NAMES } from '@ifc-lite/data';
-
-// Local shape for a drop-census class entry, matching the fields this file
-// reads off `store.dropCensus`'s `ClassCensusEntry` (see @ifc-lite/parser's
-// drop-census.ts).
-type CensusClassLike = { type: string; scanned: number; knownInSchema: boolean };
+import type { ClassCensusEntry } from '@ifc-lite/parser';
 
 export async function infoCommand(args: string[]): Promise<void> {
   const filePath = args.find(a => !a.startsWith('-'));
@@ -53,16 +49,16 @@ export async function infoCommand(args: string[]): Promise<void> {
         totalScanned: dropCensus.totalScanned,
         totalRetained: dropCensus.totalRetained,
         totalSkipped: dropCensus.totalSkipped,
-        skippedClasses: dropCensus.skippedClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
+        skippedClasses: dropCensus.skippedClasses.map((c: ClassCensusEntry) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
         // Split so a JSON consumer doesn't have to re-derive "is this a real
         // regression or universal geometry noise" itself — see
         // ClassCensusEntry.isRootDescendant in @ifc-lite/parser's drop-census.ts.
-        expectedSkippedClasses: dropCensus.expectedSkippedClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
-        unexpectedSkippedClasses: dropCensus.unexpectedSkippedClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
-        unknownClasses: dropCensus.unknownClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned })),
+        expectedSkippedClasses: dropCensus.expectedSkippedClasses.map((c: ClassCensusEntry) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
+        unexpectedSkippedClasses: dropCensus.unexpectedSkippedClasses.map((c: ClassCensusEntry) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
+        unknownClasses: dropCensus.unknownClasses.map((c: ClassCensusEntry) => ({ type: c.type, scanned: c.scanned })),
         relClassesSeen: dropCensus.relClassesSeen,
         relClassesIndexed: dropCensus.relClassesIndexed,
-        unindexedRelClasses: dropCensus.unindexedRelClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned })),
+        unindexedRelClasses: dropCensus.unindexedRelClasses.map((c: ClassCensusEntry) => ({ type: c.type, scanned: c.scanned })),
       }
     : { ran: false as const };
 
@@ -167,6 +163,17 @@ export async function infoCommand(args: string[]): Promise<void> {
       process.stdout.write(formatTable(
         ['Type', 'Count'],
         dropCensusSummary.unindexedRelClasses.map((c: { type: string; scanned: number }) => [c.type, c.scanned.toLocaleString()]),
+      ).split('\n').map(l => '    ' + l).join('\n') + '\n');
+    }
+    if (dropCensusSummary.unknownClasses.length > 0) {
+      // Classes not recognised by the bundled schema registry at all —
+      // vendor extensions or a registry gap. Loud signal; must not be
+      // silently dropped from the human-readable output while it's still
+      // in the JSON payload.
+      process.stdout.write(`  Classes not recognised by the schema registry (unknown):\n`);
+      process.stdout.write(formatTable(
+        ['Type', 'Count'],
+        dropCensusSummary.unknownClasses.map((c: { type: string; scanned: number }) => [c.type, c.scanned.toLocaleString()]),
       ).split('\n').map(l => '    ' + l).join('\n') + '\n');
     }
   }

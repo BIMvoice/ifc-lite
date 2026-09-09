@@ -11,7 +11,7 @@
  * out of sync with each other.
  */
 
-import type { DropCensus } from '@ifc-lite/parser';
+import type { DropCensus, ClassCensusEntry } from '@ifc-lite/parser';
 
 export type AuditIssue = {
   severity: 'error' | 'warning' | 'info';
@@ -21,13 +21,8 @@ export type AuditIssue = {
   entityCount?: number;
 };
 
-// Local shape for a drop-census class entry, matching the fields this file
-// reads off `store.dropCensus`'s `ClassCensusEntry` (see @ifc-lite/parser's
-// drop-census.ts).
-type CensusClassLike = { type: string; scanned: number };
-
-function summarize(classes: readonly CensusClassLike[]): { count: number; entityCount: number; sample: string } {
-  const entityCount = classes.reduce((n: number, c: CensusClassLike) => n + c.scanned, 0);
+function summarize(classes: readonly ClassCensusEntry[]): { count: number; entityCount: number; sample: string } {
+  const entityCount = classes.reduce((n: number, c: ClassCensusEntry) => n + c.scanned, 0);
   const sample = classes.slice(0, 10).map((c) => c.type).join(', ') + (classes.length > 10 ? ', …' : '');
   return { count: classes.length, entityCount, sample };
 }

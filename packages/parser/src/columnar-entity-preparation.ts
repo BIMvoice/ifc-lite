@@ -214,6 +214,7 @@ export async function prepareColumnarEntities(
     categoryByType: censusCategoryByType,
     knownByType: censusKnownByType,
     rootDescendantByType: censusRootDescendantByType,
+    alwaysRelevantTypes: RELEVANT_NON_PRODUCT_HELPERS,
     relSeenTypes: censusRelSeenTypes,
     relUnindexedTypes: censusRelUnindexedTypes,
   });

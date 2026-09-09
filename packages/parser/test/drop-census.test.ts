@@ -147,6 +147,7 @@ describe('drop census (#4208)', () => {
                 ['IFCCARTESIANPOINT', false],
                 ['IFCSURPRISINGLYDROPPEDPRODUCT', true],
             ]),
+            alwaysRelevantTypes: new Set(),
             relSeenTypes: new Set(),
             relUnindexedTypes: new Set(),
         });
@@ -164,6 +165,7 @@ describe('drop census (#4208)', () => {
             categoryByType: new Map(),
             knownByType: new Map(),
             rootDescendantByType: new Map(),
+            alwaysRelevantTypes: new Set(),
             relSeenTypes: new Set(),
             relUnindexedTypes: new Set(),
         });
@@ -173,5 +175,35 @@ describe('drop census (#4208)', () => {
         expect(census.byClass).toEqual([]);
         expect(census.expectedSkippedClasses).toEqual([]);
         expect(census.unexpectedSkippedClasses).toEqual([]);
+    });
+
+    it('surfaces a dropped alwaysRelevantTypes member as unexpected, not expected', () => {
+        // Regression coverage for the blind spot in RELEVANT_NON_PRODUCT_HELPERS
+        // (columnar-entity-preparation.ts): those 23 classes (IFCMATERIAL,
+        // IFCSIUNIT, IFCCLASSIFICATION, IFCUNITASSIGNMENT, …) are retained by
+        // explicit set membership, not by IfcRoot descendancy — none of them
+        // reach IfcRoot in the schema's inheritance chain. Before this fix,
+        // if one were ever accidentally dropped from that set (the same
+        // regression class as the IfcCovering/GEOMETRY_TYPES incident this
+        // module's docs describe), buildDropCensus would compute
+        // isRootDescendant: false and file it under expectedSkippedClasses
+        // at info severity, worded "as expected" — even though the
+        // categoriser intends to always retain it. IFCMATERIAL here stands
+        // in for any alwaysRelevantTypes member; isRootDescendant is false
+        // exactly as it is for the real class, confirmed separately via
+        // getInheritanceChain('IFCMATERIAL').includes('IFCROOT') === false.
+        const census = buildDropCensus({
+            scannedByType: new Map([['IFCMATERIAL', 4]]),
+            categoryByType: new Map([['IFCMATERIAL', 'skip']]),
+            knownByType: new Map([['IFCMATERIAL', true]]),
+            rootDescendantByType: new Map([['IFCMATERIAL', false]]),
+            alwaysRelevantTypes: new Set(['IFCMATERIAL']),
+            relSeenTypes: new Set(),
+            relUnindexedTypes: new Set(),
+        });
+
+        expect(census.skippedClasses.map(c => c.type)).toEqual(['IFCMATERIAL']);
+        expect(census.unexpectedSkippedClasses.map(c => c.type)).toEqual(['IFCMATERIAL']);
+        expect(census.expectedSkippedClasses).toEqual([]);
     });
 });

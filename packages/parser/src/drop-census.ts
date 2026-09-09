@@ -122,6 +122,23 @@ export interface DropCensusInput {
      * `unexpectedSkippedClasses` split — see {@link ClassCensusEntry.isRootDescendant}.
      */
     rootDescendantByType: Map<string, boolean>;
+    /**
+     * Uppercase STEP types the categoriser explicitly intends to retain
+     * even though they are not `IfcProduct`/`IfcRoot` descendants — e.g.
+     * `columnar-entity-preparation.ts`'s `RELEVANT_NON_PRODUCT_HELPERS`
+     * (`IFCMATERIAL`, `IFCSIUNIT`, `IFCCLASSIFICATION`, …). None of these
+     * reach `IfcRoot` in the schema's inheritance chain, so on
+     * `isRootDescendant` alone a regression that dropped one of them from
+     * that set would compute `isRootDescendant: false` and land in
+     * `expectedSkippedClasses` at `info` severity — indistinguishable from
+     * routine geometry/placement noise. Membership here means "the code
+     * intends to retain this class regardless of root-descendancy", so a
+     * skip is `unexpectedSkippedClasses` regardless of that check. Passing
+     * the set the categoriser already maintains (rather than a second,
+     * separately-hand-maintained list here) keeps the two in sync by
+     * construction.
+     */
+    alwaysRelevantTypes: Set<string>;
     /** Distinct `IFCREL*` uppercase types seen. */
     relSeenTypes: Set<string>;
     /** Distinct `IFCREL*` uppercase types seen but not indexed as an edge. */
@@ -156,8 +173,15 @@ export function buildDropCensus(input: DropCensusInput): DropCensus {
     byClass.sort((a, b) => b.scanned - a.scanned || a.type.localeCompare(b.type));
 
     const skippedClasses = byClass.filter(c => c.category === 'skip');
-    const expectedSkippedClasses = skippedClasses.filter(c => !c.isRootDescendant);
-    const unexpectedSkippedClasses = skippedClasses.filter(c => c.isRootDescendant);
+    // A class is "unexpected" if it's an IfcRoot descendant OR the
+    // categoriser explicitly intends to retain it (alwaysRelevantTypes) —
+    // see the field doc on DropCensusInput.alwaysRelevantTypes.
+    const expectedSkippedClasses = skippedClasses.filter(
+        c => !c.isRootDescendant && !input.alwaysRelevantTypes.has(c.type),
+    );
+    const unexpectedSkippedClasses = skippedClasses.filter(
+        c => c.isRootDescendant || input.alwaysRelevantTypes.has(c.type),
+    );
     const unknownClasses = byClass.filter(c => !c.knownInSchema);
     const unindexedRelClasses = byClass.filter(c => input.relUnindexedTypes.has(c.type));
 
