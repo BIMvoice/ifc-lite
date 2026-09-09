@@ -57,9 +57,69 @@ export class UnsafeRegexPatternError extends Error {
  * siblings. Does not attempt to analyse nested groups beyond one level,
  * or catastrophic shapes built from alternation (e.g. `(a|a)*`) — see
  * the module doc comment.
+ *
+ * Implemented as a manual scan, not a single regex against the pattern
+ * string. A naive `/\([^()]*[+*][^()]*\)\s*[+*{]/` scan is blind to
+ * character classes: `[^()]*` cannot cross a `)` written *inside* a
+ * `[...]` class (e.g. the harmless-looking `)` in `[)]`), so a pattern
+ * like `^(a+[)]?a+)+$` desyncs the scan's idea of where the group ends
+ * and the check never fires — even though the pattern is genuinely
+ * catastrophic (it is `(a+)+` with a no-op optional literal `)` spliced
+ * in). The scan below tracks whether it is inside an unescaped `[...]`
+ * class and, while inside one, does not treat `(` or `)` as group
+ * delimiters at all — matching how the regex engine itself parses them.
+ * It also respects backslash escapes so `\(`, `\)`, and `\[` are never
+ * mistaken for real syntax.
  */
 export function hasCatastrophicBacktrackingShape(pattern: string): boolean {
-  return /\([^()]*[+*][^()]*\)\s*[+*{]/.test(pattern);
+  const isEscaped = (s: string, idx: number): boolean => {
+    let count = 0;
+    let i = idx - 1;
+    while (i >= 0 && s[i] === '\\') {
+      count++;
+      i--;
+    }
+    return count % 2 === 1;
+  };
+
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] !== '(' || isEscaped(pattern, i)) continue;
+
+    let depth = 1;
+    let innerQuantified = false;
+    let inClass = false;
+    let j = i + 1;
+    for (; j < pattern.length && depth > 0; j++) {
+      const c = pattern[j];
+      if (c === '\\') {
+        j++; // skip the escaped character, whatever it is
+        continue;
+      }
+      if (inClass) {
+        if (c === ']') inClass = false;
+        continue; // parens and quantifiers inside a class are literal
+      }
+      if (c === '[') {
+        inClass = true;
+        continue;
+      }
+      if (c === '(') {
+        depth++;
+        continue;
+      }
+      if (c === ')') {
+        depth--;
+        continue;
+      }
+      if (depth === 1 && (c === '+' || c === '*' || c === '{')) innerQuantified = true;
+    }
+    if (depth !== 0) continue; // unbalanced -- let `new RegExp` report the syntax error
+
+    const closeIdx = j - 1; // index of this group's matching ')'
+    const after = pattern[closeIdx + 1];
+    if (innerQuantified && (after === '+' || after === '*' || after === '{')) return true;
+  }
+  return false;
 }
 
 /**

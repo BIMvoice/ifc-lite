@@ -27,6 +27,21 @@ describe('hasCatastrophicBacktrackingShape', () => {
     expect(hasCatastrophicBacktrackingShape('.*')).toBe(false);
     expect(hasCatastrophicBacktrackingShape('a+')).toBe(false);
   });
+
+  it('flags a character-class bypass of the naive scan (#4318)', () => {
+    // `[)]` is a class containing a literal `)`, not a group-closer. A scan
+    // that isn't character-class aware desyncs here and never finds the
+    // real `(a+ ... a+)+` catastrophic shape. Measured: this pattern takes
+    // seconds to fail to match a ~30-character non-matching subject.
+    expect(hasCatastrophicBacktrackingShape('^(a+[)]?a+)+$')).toBe(true);
+  });
+
+  it('does not flag a legitimate pattern that merely contains a class with a paren', () => {
+    // These must stay ACCEPTED -- a fix that rejects every pattern
+    // containing `[` would break real IDS/list-filter patterns.
+    expect(hasCatastrophicBacktrackingShape('^[(].*[)]$')).toBe(false);
+    expect(hasCatastrophicBacktrackingShape('^Wall-[0-9]{3}$')).toBe(false);
+  });
 });
 
 describe('assertGuardedRegexPattern', () => {
