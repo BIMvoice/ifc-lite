@@ -63,3 +63,5 @@ export { columnsToParquet, isParquet } from './columns-to-parquet.js';
 export { escapeCsvCell, guardSpreadsheetFormula, type CsvCellOptions } from './csv-cell.js';
 
 export { planAuthoredResourceCleanup } from './authored-resource-cleanup.js';
+
+export { captureAppearanceDependencies } from './appearance-dependencies.js';

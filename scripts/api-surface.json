@@ -4168,6 +4168,7 @@
     "StepExporter: class",
     "Vec3: type",
     "applySimplifiedGeometry: function",
+    "captureAppearanceDependencies: function",
     "collectReferencedEntityIds: function",
     "collectRelatedEntities: function",
     "collectStyleEntities: function",
