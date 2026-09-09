@@ -67,7 +67,14 @@ const REGISTRIES_BY_VERSION: Record<SchemaVersionWithRegistry, SchemaRegistry> =
  * membership themselves before calling.
  */
 export function getSchemaRegistryForVersion(version: SchemaVersionWithRegistry): SchemaRegistry {
-  return assertNonEmptyRegistry(REGISTRIES_BY_VERSION[version], version);
+  const registry = REGISTRIES_BY_VERSION[version];
+  if (registry === undefined) {
+    throw new Error(
+      `getSchemaRegistryForVersion(${JSON.stringify(version)}): no codegen-generated registry exists for ` +
+        `this schema version. Supported versions: ${Object.keys(REGISTRIES_BY_VERSION).join(', ')}.`,
+    );
+  }
+  return assertNonEmptyRegistry(registry, version);
 }
 
 /**

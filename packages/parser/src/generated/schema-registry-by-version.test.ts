@@ -28,6 +28,15 @@ describe('getSchemaRegistryForVersion', () => {
     expect(getSchemaRegistryForVersion('IFC2X3').name).toBe('IFC2X3');
     expect(getSchemaRegistryForVersion('IFC4').name).toBe('IFC4_ADD2_TC1');
   });
+
+  it('throws an error naming the bad version and listing supported ones for an unknown version', () => {
+    // @ts-expect-error — exercising the runtime guard for a caller that
+    // bypasses the SchemaVersionWithRegistry type (e.g. an untyped string
+    // read off a parsed model's schemaVersion).
+    expect(() => getSchemaRegistryForVersion('IFC4X1')).toThrow(
+      /getSchemaRegistryForVersion\("IFC4X1"\): no codegen-generated registry exists.*Supported versions: IFC2X3, IFC4, IFC4X3/s,
+    );
+  });
 });
 
 describe('assertNonEmptyRegistry — fail loud on zero (mutation target)', () => {
