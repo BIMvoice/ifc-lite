@@ -3,13 +3,22 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * On-demand attribute extraction for `SpatialHierarchyBuilder`: LongName and
- * storey elevation. Split out of `spatial-hierarchy-builder.ts` (a pure,
- * behavior-preserving move, not a rewrite) to keep that file under the
- * module-size budget; nothing here changes what either function returns.
+ * Attribute extraction for spatial hierarchy nodes - reads a node's LongName,
+ * its IfcBuildingStorey Elevation, and the ObjectPlacement-Z fallback
+ * straight off the raw IFC records via `EntityExtractor`.
+ *
+ * Split out of spatial-hierarchy-builder.ts: these three functions share one
+ * concern - resolving values from source bytes when a source is available -
+ * distinct from the tree-building recursion in `buildNode` that calls them.
+ * Same pattern as spatial-hierarchy-canonical-parent.ts, which split out the
+ * cycle-safe canonical-parent resolution for the same reason.
  */
 
-import { createLogger, IFC_BUILDING_STOREY_ELEVATION_INDEX, IFC_BUILDING_STOREY_PLACEMENT_INDEX } from '@ifc-lite/data';
+import {
+  createLogger,
+  IFC_BUILDING_STOREY_ELEVATION_INDEX,
+  IFC_BUILDING_STOREY_PLACEMENT_INDEX,
+} from '@ifc-lite/data';
 import type { EntityRef } from './types.js';
 import { EntityExtractor } from './entity-extractor.js';
 import type { IfcSourceBytes } from './source-bytes.js';
@@ -17,7 +26,14 @@ import { getAttributeNamesAcrossSchemas } from './ifc-schema.js';
 
 const log = createLogger('SpatialHierarchy');
 
-type EntityIndex = { byId: { get(expressId: number): EntityRef | undefined } };
+/** Source bytes needed to read on-demand attributes off the raw records
+ *  (storey elevation, LongName). Present on the fresh-parse / cache-with-source
+ *  path, absent on the source-less `buildFromCache` fallback. */
+export interface AttributeSource {
+  source: Uint8Array | IfcSourceBytes;
+  entityIndex: { byId: { get(expressId: number): EntityRef | undefined } };
+  lengthUnitScale: number;
+}
 
 /**
  * Read an entity's LongName by schema attribute *name*. IfcSite / IfcBuilding /
@@ -26,16 +42,16 @@ type EntityIndex = { byId: { get(expressId: number): EntityRef | undefined } };
  * so resolving by name (not a fixed index) stays correct across the IfcRoot
  * family. The lookup spans every bundled schema, so IFC4.3 leaves outside the
  * parser's IFC4 codegen pin resolve too. Returns the trimmed value, or
- * undefined when the type declares no LongName, it is empty, or no attribute
- * extractor is available (the buildFromCache path).
+ * undefined when the type declares no LongName, it is empty, or no source
+ * buffer is available (the buildFromCache path).
  */
 export function extractLongName(
   expressId: number,
-  entityIndex: EntityIndex | undefined,
+  attrSource: AttributeSource | undefined,
   attrExtractor: EntityExtractor | undefined
 ): string | undefined {
-  if (!entityIndex || !attrExtractor) return undefined;
-  const ref = entityIndex.byId.get(expressId);
+  if (!attrSource || !attrExtractor) return undefined;
+  const ref = attrSource.entityIndex.byId.get(expressId);
   if (!ref) return undefined;
   try {
     const entity = attrExtractor.extractEntity(ref);
@@ -46,7 +62,10 @@ export function extractLongName(
     const value = typeof raw === 'string' ? raw.trim() : '';
     return value.length > 0 ? value : undefined;
   } catch (error) {
-    log.caught('Failed to extract LongName', error, { operation: 'extractLongName', entityId: expressId });
+    log.caught('Failed to extract LongName', error, {
+      operation: 'extractLongName',
+      entityId: expressId,
+    });
     return undefined;
   }
 }
@@ -60,7 +79,7 @@ export function extractLongName(
 export function extractElevation(
   expressId: number,
   source: Uint8Array | IfcSourceBytes,
-  entityIndex: EntityIndex
+  entityIndex: { byId: { get(expressId: number): EntityRef | undefined } }
 ): number | undefined {
   const ref = entityIndex.byId.get(expressId);
   if (!ref) return undefined;
@@ -114,7 +133,7 @@ export function extractElevation(
 export function extractPlacementElevation(
   expressId: number,
   source: Uint8Array | IfcSourceBytes,
-  entityIndex: EntityIndex
+  entityIndex: { byId: { get(expressId: number): EntityRef | undefined } }
 ): number | undefined {
   try {
     const extractor = new EntityExtractor(source);

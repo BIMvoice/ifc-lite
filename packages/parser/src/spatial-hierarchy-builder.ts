@@ -27,17 +27,13 @@ import type { EntityRef } from './types.js';
 import { EntityExtractor } from './entity-extractor.js';
 import type { IfcSourceBytes } from './source-bytes.js';
 import { computeCanonicalParent } from './spatial-hierarchy-canonical-parent.js';
-import { extractLongName, extractElevation, extractPlacementElevation } from './spatial-hierarchy-attribute-extraction.js';
+import {
+  type AttributeSource,
+  extractLongName,
+  extractElevation,
+  extractPlacementElevation,
+} from './spatial-hierarchy-attributes.js';
 import { computeAmbiguousStorey } from './spatial-hierarchy-ambiguity.js';
-
-/** Source bytes needed to read on-demand attributes off the raw records
- *  (storey elevation, LongName). Present on the fresh-parse / cache-with-source
- *  path, absent on the source-less `buildFromCache` fallback. */
-interface AttributeSource {
-  source: Uint8Array | IfcSourceBytes;
-  entityIndex: { byId: { get(expressId: number): EntityRef | undefined } };
-  lengthUnitScale: number;
-}
 
 /** Accumulators threaded through the recursion, plus the optional attribute source. */
 interface BuildContext {
@@ -200,7 +196,7 @@ export class SpatialHierarchyBuilder {
     // show both (issue #1634). It lives only in the raw record, so it needs the
     // source bytes; the source-less buildFromCache fallback leaves it undefined,
     // exactly like storey elevation.
-    const rawLongName = extractLongName(expressId, ctx.attrSource?.entityIndex, ctx.attrExtractor);
+    const rawLongName = extractLongName(expressId, ctx.attrSource, ctx.attrExtractor);
     // Fall back to LongName when Name is empty (common for IfcSpace). Left
     // empty, not a fabricated `Entity #<id>` — it flows into the export layer.
     const name = rawName || rawLongName || '';
