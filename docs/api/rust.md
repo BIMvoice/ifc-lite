@@ -516,6 +516,16 @@ pub use parallel_scan::build_entity_index_parallel;
 
 ### Appearance authoring
 
+`ifc_lite_processing::appearance::calibrate_appearance_plane` establishes one
+measured plane from two stable native-source landmarks and a known distance.
+`PlaneCalibrationRequest` supplies the raster-to-source affine, raster extent
+and an IFC Z-up world anchor/direction/normal. `CalibratedPlane` returns a
+world-space `Mapping::Planar`, raster corners and metres per source unit.
+Crop, page rotation and raster DPI only change the raster-to-source transform;
+they do not change the retained calibration landmarks or measured distance.
+This bounded calculation does not mutate IFC or composite pixels outside the
+page. Invalid, sheared or unrepresentable planes fail explicitly.
+
 `ifc_lite_processing::appearance::plan_appearance` prepares image and UV edits
 against an effective IFC STEP snapshot. It shares canonical geometry production
 with loading and returns both IFC edit operations and per-corner preview data.
