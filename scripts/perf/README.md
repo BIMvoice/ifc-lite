@@ -951,6 +951,24 @@ allocation limits and keeps valid split batches with a reported warning if
 replacement allocation fails. The lesson is to check the post-cancel draw
 structure as well as geometry and picking: a correct image alone hid persistent
 batch fragmentation.
+
+### Appearance Apply composition and unchanged dependency rows (#4243)
+
+A real Convento whole-model Apply profile located synchronous dependency row
+serialization and nested atomic snapshots in the click handler. Keep unchanged
+non-binding source rows as bounded byte scans and compose appearance edits
+inside the command's existing detached transaction; standalone helpers remain
+atomic. Three interleaved fresh-browser A/B pairs show a combined reduction in
+Apply delay, with identical geometry/UV bytes for all authored parts and intact
+Undo/Redo and non-target-model isolation. The remaining frame stall still fails
+the intended interaction smoothness bar. This is a development-viewer action
+measurement, not cold-load throughput, GPU completion, or an isolated attribution
+to either change. Raw samples and artifact hashes are retained in
+`docs/architecture/evidence/appearance/appearance-apply-paired-summary.json` and
+`appearance-apply-paired-manifest.json`. Preserve transaction ownership and
+rollback checks while addressing the remaining work; do not remove them to
+make an incomplete commit appear faster.
+
 ### Opt-in appearance planning (#4243)
 
 Appearance planning invokes canonical mesh production for the source and planned
@@ -1018,3 +1036,16 @@ UVs, owner identity, Undo/Redo and the untouched federated model were checked;
 the remaining main-thread stall still fails the intended smoothness requirement.
 Do not treat fewer copies or a faster helper microbenchmark as acceptance: retain
 the paired interaction measurement and continue profiling transaction preparation.
+
+### Cooperative appearance command preparation (#4336)
+
+The appearance command now consumes owned cooperative entity operations and keeps
+its final source, dependency, resource and history checks synchronous. A fresh
+real Convento browser interaction confirms that preparation yields, but the
+final synchronous phase still produces a visible long task and rendering gaps
+remain during preparation. This is an observational integration sample, not an
+isolated speedup or smoothness-complete verdict. Do not infer responsiveness from
+an async return type or successful cancellation tests. Retain the exact fences
+while addressing remaining synchronous dependency work separately. Raw timing,
+source/runtime identity and functional Undo/Redo evidence are recorded under
+`docs/architecture/evidence/appearance/appearance-cooperative-apply-*`.
