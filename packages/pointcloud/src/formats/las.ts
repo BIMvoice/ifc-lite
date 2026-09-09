@@ -223,6 +223,7 @@ export function decodeLasPoints(
 
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  let anyFinite = false;
   const offX = originOffset?.[0] ?? 0;
   const offY = originOffset?.[1] ?? 0;
   const offZ = originOffset?.[2] ?? 0;
@@ -238,11 +239,17 @@ export function decodeLasPoints(
     positions[i * 3] = x;
     positions[i * 3 + 1] = y;
     positions[i * 3 + 2] = z;
-    // Skip non-finite coords rather than letting them poison the bbox.
-    // A single NaN/Infinity from a corrupt header or an originOffset that
-    // itself is non-finite would otherwise propagate — see
-    // e57-decode.ts's / ifcx-points.ts's `computeBBox` for the same guard.
+    // Skip non-finite coords rather than letting them poison the bbox, and
+    // track whether any point was actually finite: if EVERY point in the
+    // chunk overflows (e.g. a finite-but-huge header scale that passes
+    // parseLasHeader's validation but sends `raw * scale` to ±Infinity for
+    // every record), minX/minY/minZ would otherwise be left at their
+    // ±Infinity seed values below — the same poisoning #4271 exists to
+    // prevent, just resurfacing when the whole chunk is bad instead of one
+    // point. Mirrors e57-decode.ts's / ifcx-points.ts's `computeBBox`,
+    // which both fall back to a finite zero-bbox for the same reason.
     if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      anyFinite = true;
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
@@ -272,7 +279,9 @@ export function decodeLasPoints(
     classifications,
     intensities,
     pointCount: count,
-    bbox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
+    bbox: anyFinite
+      ? { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] }
+      : { min: [0, 0, 0], max: [0, 0, 0] },
   };
 }
 

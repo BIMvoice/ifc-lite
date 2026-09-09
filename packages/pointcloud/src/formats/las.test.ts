@@ -311,6 +311,30 @@ describe('decodeLasPoints', () => {
     expect(chunk.bbox).toEqual({ min: [0, 2, 2], max: [0, 2, 2] });
   });
 
+  it('falls back to a finite zero-bbox when every point in the chunk is non-finite', () => {
+    // Mirrors e57-decode.ts's / ifcx-points.ts's `computeBBox`: if the fold
+    // never sees a finite point, min/max must not be left at their
+    // ±Infinity seed values (that's the exact poisoning #4271 exists to
+    // prevent — it just resurfaces one level up when EVERY point, not just
+    // some, overflows). A finite-but-huge scale passes parseLasHeader's own
+    // Number.isFinite/!==0 validation, then `raw * scale` overflows to
+    // ±Infinity for every point in the chunk.
+    const { header } = buildHeader({
+      pointDataFormatId: 0,
+      pointRecordLength: 20,
+      pointCount: 2,
+      scale: [1e300, 1e300, 1e300],
+      offset: [0, 0, 0],
+    });
+    const h = parseLasHeader(header);
+    const records = buildFormat0Records([
+      { x: 2_000_000_000, y: 2_000_000_000, z: 2_000_000_000 },
+      { x: 1_000_000_000, y: 1_000_000_000, z: 1_000_000_000 },
+    ]);
+    const chunk = decodeLasPoints(records, h, 2, 20);
+    expect(chunk.bbox).toEqual({ min: [0, 0, 0], max: [0, 0, 0] });
+  });
+
   it('subtracts originOffset in f64 before narrowing to f32 (issue #1804)', () => {
     // A georeferenced point cloud whose LAS header offset is a real-world
     // UTM-scale value (~5e5, ~5e6) — narrowing the ABSOLUTE coordinate
