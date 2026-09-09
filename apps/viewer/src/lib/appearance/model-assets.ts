@@ -1,6 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import { textureUrlBasename } from '@/utils/textureResources.js';
+import { AuthoredResourceLifecycle } from './authored-resource-lifecycle.js';
 import type { IfcDataStore } from '@ifc-lite/parser';
 import { AppearanceAssetInventory, AppearanceAssetError, type AppearanceBitmap } from './assets.js';
 
@@ -16,14 +18,18 @@ interface ModelImages {
   incomplete: boolean;
 }
 
-// File-controlled archive paths must not inject control characters into diagnostics.
-// eslint-disable-next-line no-control-regex -- This character class intentionally removes ASCII controls.
+// Strip file-supplied control bytes before placing archive paths in notices.
+// eslint-disable-next-line no-control-regex
 function displayPath(path: string): string { return path.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 160); }
 
 /** Original bytes belong to the model, independently of uploaded GPU copies. */
 export class ModelAppearanceAssets<B extends AppearanceBitmap = ImageBitmap> {
   private models = new Map<string, ModelImages>();
   private authored = new Map<string, Map<string, Set<string>>>();
+  readonly authoredLifecycle = new AuthoredResourceLifecycle(
+    (modelId, commandId) => this.unregisterAuthored(modelId, commandId),
+    (modelId, commandId) => [...this.authored.get(modelId)?.get(commandId) ?? []].map(id => this.getAuthoredUri(modelId, id)),
+  );
   private pending = new Map<string, { cancel(): void }>();
   constructor(readonly inventory: AppearanceAssetInventory<B>) {}
 
@@ -158,6 +164,16 @@ export class ModelAppearanceAssets<B extends AppearanceBitmap = ImageBitmap> {
     this.authored.set(modelId, commands);
     for (const id of previous) this.releaseUnused(modelId, id);
   }
+  hasAuthoredRegistration(modelId: string, commandId: string): boolean {
+    return this.authored.get(modelId)?.has(commandId) ?? false;
+  }
+  releaseAuthoredIfUnreferenced(modelId: string, commandId: string, imageUris: ReadonlySet<string>): void {
+    const retained = new Set([...imageUris].map(textureUrlBasename));
+    for (const id of this.authored.get(modelId)?.get(commandId) ?? []) {
+      if (retained.has(textureUrlBasename(this.getAuthoredUri(modelId, id)))) return;
+    }
+    this.unregisterAuthored(modelId, commandId);
+  }
   unregisterAuthored(modelId: string, commandId: string): void {
     const commands = this.authored.get(modelId);
     const ids = commands?.get(commandId);
@@ -182,12 +198,14 @@ export class ModelAppearanceAssets<B extends AppearanceBitmap = ImageBitmap> {
     this.inventory.release(assetId, { kind: 'model', id: modelId });
   }
   remove(modelId: string): void {
+    this.authoredLifecycle.remove(modelId);
     this.pending.get(modelId)?.cancel();
     this.models.delete(modelId);
     this.authored.delete(modelId);
     this.inventory.releaseOwner({ kind: 'model', id: modelId });
   }
   clear(): void {
+    this.authoredLifecycle.clear();
     for (const pending of this.pending.values()) pending.cancel();
     for (const modelId of new Set([...this.models.keys(), ...this.authored.keys()])) this.remove(modelId);
   }

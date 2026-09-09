@@ -4,6 +4,8 @@
 import '@/test/setup-dom.js';
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
+import { IfcParser } from '@ifc-lite/parser';
+import { MutablePropertyView, StoreEditor } from '@ifc-lite/mutations';
 import { AppearanceAssetInventory } from './assets.js';
 import { ModelAppearanceAssets, modelAppearanceAssets } from './model-assets.js';
 import { useViewerStore } from '@/store';
@@ -265,6 +267,42 @@ it('holds images until delayed metadata finalization and releases rejected or re
     if (outcome === 'reject' || outcome === 'partial') reject(new Error('metadata failed')); else resolve();
     await settled;
     assert.equal(models.exportOriginals(outcome).resources.size, outcome === 'success' || outcome === 'partial' ? 1 : 0);
+    models.clear();
+    assert.equal(bitmap.closes, 1);
+  }
+});
+
+// #4243: collected authored definitions must not release an imported owner's bytes.
+it('reconciles authored definitions while preserving shared originals and cancelling removal-time cleanup', async () => {
+  for (const removedBeforeCleanup of [false, true]) {
+    const bitmap = image();
+    const inventory = new AppearanceAssetInventory({ decode: async () => bitmap });
+    const models = new ModelAppearanceAssets(inventory);
+    const load = models.begin('gc'); await load.decode(archive()); load.finish(true);
+    const owner = { kind: 'draft' as const, id: 'gc' };
+    const asset = await inventory.add(png(), { owner });
+    const source = new TextEncoder().encode("ISO-10303-21;HEADER;FILE_DESCRIPTION(('GC'),'2;1');FILE_NAME('gc.ifc','',(''),(''),'','','');FILE_SCHEMA(('IFC4'));ENDSEC;DATA;#1=IFCCOLOURRGB($,1.,1.,1.);ENDSEC;END-ISO-10303-21;");
+    const dataStore = await new IfcParser().parseColumnar(source.buffer);
+    const view = new MutablePropertyView(dataStore.properties, 'gc');
+    const editor = new StoreEditor(dataStore, view);
+    const texture = editor.addEntity('IfcImageTexture', [true, true, 'DIFFUSE', null, null, asset.exportName]);
+    models.registerAuthored('gc', 'command', [asset.id]);
+    let revisions = 0;
+    models.authoredLifecycle.track('gc', 'command', { dataStore, view, isCurrent: () => true, changed: () => { revisions++; } }, view.getNewEntities(), []);
+    models.authoredLifecycle.retire('gc', 'command');
+    inventory.releaseOwner(owner);
+    if (removedBeforeCleanup) models.remove('gc');
+    await Promise.resolve();
+    if (removedBeforeCleanup) {
+      assert.equal(revisions, 0);
+      assert.ok(view.getNewEntity(texture.expressId), 'queued cleanup cannot mutate an unloaded model');
+    } else {
+      assert.equal(revisions, 1);
+      assert.equal(view.getNewEntity(texture.expressId), null);
+      assert.ok(inventory.get(asset.id));
+      assert.deepEqual(models.exportResources('gc').resources, archive().originalResources);
+      assert.equal(bitmap.closes, 0, 'shared imported source still owns its decoded bitmap');
+    }
     models.clear();
     assert.equal(bitmap.closes, 1);
   }
