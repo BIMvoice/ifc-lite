@@ -20,7 +20,8 @@ import { buildModelLoadReportPatch, type ModelLoadReportFields } from '../lib/lo
 import { computeSourceFingerprint } from './sourceFingerprint.js';
 import { computeFullSourceHash } from '../utils/sourceContentHash.js';
 import { IfcParser, detectFormat, unwrapIfcZipWithResources, type IfcDataStore } from '@ifc-lite/parser';
-import { decodeTextureResources, attachTextureBitmaps, type TextureBitmapStore } from '../utils/textureResources.js';
+import { attachTextureBitmaps, type TextureBitmapStore } from '../utils/textureResources.js';
+import { modelAppearanceAssets } from '../lib/appearance/model-assets.js';
 import { WorkerParser } from '@ifc-lite/parser/browser';
 import { memoryAccounting } from '../lib/perf/memoryAccounting.js';
 import {
@@ -411,6 +412,7 @@ export function useIfcLoader() {
      * stays null for those.
      */
     let geometryHandle: GeometryProcessorDisposer | null = null;
+    let appearanceLoad: ReturnType<typeof modelAppearanceAssets.begin> | undefined;
 
     /**
      * Resource-limit recovery, shared by BOTH failure paths.
@@ -776,13 +778,9 @@ export function useIfcLoader() {
       if (!pointCloudFormat) {
         const zipContents = await unwrapIfcZipWithResources(buffer);
         buffer = zipContents.model;
-        // #1781: decode sibling texture images (IfcImageTexture targets) once,
-        // up front — mesh batches attach the shared bitmaps synchronously as
-        // they arrive. Empty/no-zip loads resolve to null and pay nothing.
-        textureBitmaps = await decodeTextureResources(zipContents.resources);
-        if (textureBitmaps) {
-          console.log(`[useIfc] Decoded ${textureBitmaps.size} .ifcZIP texture image(s)`);
-        }
+        // Retain original archive paths/encoded bytes alongside shared bitmaps.
+        appearanceLoad = modelAppearanceAssets.begin(modelId);
+        textureBitmaps = await appearanceLoad.decode(zipContents);
       }
 
       const sourceKeyFingerprint = computeSourceFingerprint(buffer);
@@ -1378,15 +1376,14 @@ export function useIfcLoader() {
       // Default path: parser runs in a Web Worker via WorkerParser, both
       // workers + main share the same SharedArrayBuffer source, and the
       // main thread never blocks on parse.
-      // Fallback: in-process IfcParser.parseColumnar (the previous default)
-      // — used when cross-origin isolation is missing or the worker spawn
-      // fails (auto-fallback inside the catch).
+      // Fall back to main-thread parsing when isolation or worker startup fails.
       let resolveDataStore: (dataStore: IfcDataStore) => void;
       let rejectDataStore: (err: unknown) => void;
       const dataStorePromise = new Promise<IfcDataStore>((resolve, reject) => {
         resolveDataStore = resolve;
         rejectDataStore = reject;
       });
+      if (target.kind === 'primary') void appearanceLoad?.finishAfter(dataStorePromise, () => useViewerStore.getState().models.get(modelId));
 
       const onPartialDataStore = (partialStore: IfcDataStore) => {
         if (loadSessionRef.current !== currentSession) return;
@@ -2052,6 +2049,7 @@ export function useIfcLoader() {
                   });
                 }
               });
+              if (target.kind === 'federated') void appearanceLoad?.finishAfter(finalizePromise, () => useViewerStore.getState().models.get(modelId));
               break;
           }
         }
@@ -2224,7 +2222,8 @@ export function useIfcLoader() {
       // and a `dispose()` placed after the last statement would miss all of
       // them. The free itself still waits on the parse chain; see
       // createGeometryProcessorDisposer.
-      geometryHandle?.release();
+      try { appearanceLoad?.finishForModel(useViewerStore.getState().models.get(modelId)); }
+      finally { geometryHandle?.release(); }
     }
   }, [setLoading, setGeometryStreamingActive, setError, setProgress, setIfcDataStore, setGeometryResult, appendGeometryBatch, appendInstancedShards, updateMeshColors, updateCoordinateInfo, loadFromCache, saveToCache, loadFromServer, revalidateSourceDecoupledHit]);
 
