@@ -1,0 +1,41 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+export type AppearanceScope =
+  | { kind: 'model' | 'selection' }
+  | { kind: 'class'; ifcClass: string }
+  | { kind: 'type'; typeId: number };
+
+/** Editable display values; the controller converts degrees/axes to canonical requests. */
+export interface AppearanceDraftSettings {
+  kind: 'existingUv' | 'planar' | 'box';
+  plane: 'xy' | 'xz' | 'yz';
+  repeatU: number;
+  repeatV: number;
+  tileWidth: number;
+  tileHeight: number;
+  tileDepth: number;
+  rotationDegrees: number;
+  /** UV cycles in existingUv mode; metres in planar/box mode. */
+  offsetU: number;
+  offsetV: number;
+  offsetW: number;
+  repeatS: boolean;
+  repeatT: boolean;
+}
+export interface AppearanceSourceOption {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  /** Session catalog-owned URL, revoked when its source is removed. */
+  thumbnailUrl?: string;
+}
+/** Logical draft only. GPU resources, plans and pending jobs are never stored. */
+export interface AppearanceDraftRecipe {
+  modelId: string | null;
+  sourceId: string | null;
+  scope: AppearanceScope;
+  settings: AppearanceDraftSettings;
+  previewEnabled: boolean;
+}
