@@ -74,7 +74,10 @@ const PINNED_SESSION_RESET_KEYS: readonly string[] = [
   'selectedEntitiesSet', 'selectedEntity', 'selectedEntityId', 'selectedEntityIds',
   'selectedModelId', 'selectedStoreys', 'selectedTaskGlobalIds', 'separationLinesEnabled',
   'separationLinesIntensity', 'separationLinesQuality', 'separationLinesRadius',
-  'sheetEnabled', 'sheetPanelVisible', 'suppressNextSection2DPanelAutoOpen',
+  'sheetEnabled', 'sheetPanelVisible', 'slabCutAnchor', 'slabCutFootprint',
+  'slabCutStoreyElevation', 'splitHoverAxisDirection', 'splitHoverCutPoint',
+  'splitHoverDistance', 'splitHoverLength', 'splitHoverPoint', 'splitMode',
+  'splitTargetExpressId', 'splitTargetModelId', 'suppressNextSection2DPanelAutoOpen',
   'textAnnotation2DEditing', 'textAnnotations2D', 'titleBlockEditorVisible', 'typeViewMode',
   'typeVisibility', 'undoStacks', 'visualEnhancementsEnabled', 'zoneApportionment',
   'zoneAssignmentTiming', 'zoneAssignments',
@@ -87,6 +90,9 @@ const PINNED_ALL_MODELS_CLEARED_KEYS: readonly string[] = [
   'hierarchyBasketSelection', 'hoverState', 'ifcDataStore', 'isolatedEntities', 'isolatedEntitiesByModel',
   'meshColorBackup', 'models', 'pinboardEntities', 'selectedEntities', 'selectedEntitiesSet',
   'selectedEntity', 'selectedEntityId', 'selectedEntityIds', 'selectedModelId', 'selectedStoreys',
+  'slabCutAnchor', 'slabCutFootprint', 'slabCutStoreyElevation', 'splitHoverAxisDirection',
+  'splitHoverCutPoint', 'splitHoverDistance', 'splitHoverLength', 'splitHoverPoint', 'splitMode',
+  'splitTargetExpressId', 'splitTargetModelId',
 ];
 
 /**
@@ -232,7 +238,10 @@ const PINNED_OWNED_KEYS: readonly string[] = [
   'selectedEntitiesSet', 'selectedEntity', 'selectedEntityId', 'selectedEntityIds',
   'selectedModelId', 'selectedStoreys', 'selectedTaskGlobalIds', 'separationLinesEnabled',
   'separationLinesIntensity', 'separationLinesQuality', 'separationLinesRadius',
-  'sheetEnabled', 'sheetPanelVisible', 'suppressNextSection2DPanelAutoOpen',
+  'sheetEnabled', 'sheetPanelVisible', 'slabCutAnchor', 'slabCutFootprint',
+  'slabCutStoreyElevation', 'splitHoverAxisDirection', 'splitHoverCutPoint',
+  'splitHoverDistance', 'splitHoverLength', 'splitHoverPoint', 'splitMode',
+  'splitTargetExpressId', 'splitTargetModelId', 'suppressNextSection2DPanelAutoOpen',
   'textAnnotation2DEditing', 'textAnnotations2D', 'titleBlockEditorVisible', 'typeViewMode',
   'typeVisibility', 'undoStacks', 'visualEnhancementsEnabled', 'zoneApportionment',
   'zoneAssignmentTiming', 'zoneAssignments',
