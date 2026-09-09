@@ -951,3 +951,35 @@ allocation limits and keeps valid split batches with a reported warning if
 replacement allocation fails. The lesson is to check the post-cancel draw
 structure as well as geometry and picking: a correct image alone hid persistent
 batch fragmentation.
+### Prepared-overlay comparison ownership (#4243)
+
+Compare a private borrowed overlay descriptor synchronously against the detached
+checkpoint. Cloning the live overlay solely to compare it adds allocation while
+providing no additional isolation; original/draft/prepared/publication snapshots
+remain deep copies. Cyclic escaped values, skip-history edits and rollback
+rejection remain covered. A fresh real Convento Apply profile with this change
+and the earlier command/dependency changes still locates substantial synchronous
+work in dependency scanning and authored-data/history construction plus retained
+snapshots. This single sampled run does not establish an isolated improvement
+for comparison-only clone removal. Keep ownership guards while investigating
+preparation outside the Apply interaction. The profile, timing, summary and
+exact source/runtime hashes are in
+`docs/architecture/evidence/appearance/appearance-apply-after-comparison-*`.
+
+### Appearance dependency validation: immutable source byte scan (#4243)
+
+The Apply CPU profile identified effective dependency capture and repeated overlay
+copies as the dominant main-thread work. Unchanged source rows already use
+immutable markers in history checkpoints; decoding, rewriting and re-encoding
+large coordinate rows only to extract references therefore adds no validation
+information. Read those non-binding rows with the canonical source-byte scanner.
+Keep edited, authored, retyped and inverse-binding rows on the effective STEP
+writer path, with unchanged byte/reference budgets and compressed-source support.
+
+Three interleaved fresh-browser Convento pairs showed a consistent end-to-end
+Apply improvement when combined with removing nested appearance transactions.
+This is a combined result, not an isolated speedup for the scanner. Geometry,
+UVs, owner identity, Undo/Redo and the untouched federated model were checked;
+the remaining main-thread stall still fails the intended smoothness requirement.
+Do not treat fewer copies or a faster helper microbenchmark as acceptance: retain
+the paired interaction measurement and continue profiling transaction preparation.
