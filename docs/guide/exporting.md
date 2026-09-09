@@ -2,6 +2,21 @@
 
 Guide to exporting IFC data in various formats.
 
+## Textured IFC in the web viewer
+
+Normal IFC exports, visible subsets, and Export Changes package retained image
+resources into `.ifczip` automatically. The archive preserves original PNG/JPEG
+bytes, the IFC entry directory, and relative texture paths; authored images use
+content-addressed filenames. Untextured models continue to download as `.ifc`.
+Export is unavailable while images load and refuses missing or budget-omitted resources
+rather than producing an apparently complete textureless file.
+
+Merged textured-model export currently requires texture URL remapping and is
+unavailable. Export each model separately to preserve its appearance. Subset
+archives may retain unused images from their source model. The STEP subset
+closure retains inverse texture maps for included faces, including maps created
+or retargeted through pending edits.
+
 ## Quick Start: CDN Export (No Build Required)
 
 Export IFC to GLB directly in the browser with zero setup:

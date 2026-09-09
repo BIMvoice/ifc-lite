@@ -17,6 +17,7 @@
  */
 
 import { StepExporter, Ifc5Exporter } from '@ifc-lite/export';
+import { packagePortableIfcAsync } from './portable-ifc.js';
 import type { IfcDataStore } from '@ifc-lite/parser';
 import type { MutablePropertyView } from '@ifc-lite/mutations';
 import { spliceScheduleIntoExport } from '@/sdk/adapters/export-schedule-splice';
@@ -55,7 +56,7 @@ export async function exportChangedModelToStep(
     content = spliceScheduleIntoExport({ content }, modelId, dataStore, invocation.scheduleState).content;
   }
 
-  return { content, ext: 'ifc', mime: 'text/plain' };
+  return packagePortableIfcAsync(modelId, content);
 }
 
 /**
