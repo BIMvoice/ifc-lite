@@ -59,6 +59,8 @@ test('actual WASM worker function plans source-corner UVs and survives rejected 
   assert.equal(result.items[0].geometryItemId, 14);
   assert.deepEqual(result.items[0].texCoords, [[0.25, 0.5], [2.25, 0.5], [0.25, 3.5]]);
   assert.deepEqual(result.items[0].previewCornerUvs, [0.25, 0.5, 2.25, 0.5, 0.25, -2.5]);
+  // The IFC +Z triangle normal must arrive in the renderer +Y frame.
+  assert.deepEqual(result.items[0].targetCornerNormals.map(v => v === 0 ? 0 : v), [0, 1, 0, 0, 1, 0, 0, 1, 0]);
   await assert.rejects(runAppearancePlanning(source, { ...request, nextExpressId: 20 }), /watermark/);
   assert.equal((await runAppearancePlanning(source, request)).created.length, 8);
 });
