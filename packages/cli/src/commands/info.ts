@@ -13,6 +13,11 @@ import { printJson, formatTable, hasFlag, fatal } from '../output.js';
 import { EntityNode } from '@ifc-lite/query';
 import { IFC_ENTITY_NAMES } from '@ifc-lite/data';
 
+// Local shape for a drop-census class entry, matching the fields this file
+// reads off `store.dropCensus`'s `ClassCensusEntry` (see @ifc-lite/parser's
+// drop-census.ts).
+type CensusClassLike = { type: string; scanned: number; knownInSchema: boolean };
+
 export async function infoCommand(args: string[]): Promise<void> {
   const filePath = args.find(a => !a.startsWith('-'));
   if (!filePath) fatal('Usage: ifc-lite info <file.ifc> [--format json|table]');
@@ -38,6 +43,24 @@ export async function infoCommand(args: string[]): Promise<void> {
     return { name: node.name, expressId: id };
   });
 
+  // Semantic drop census (#4208): report honestly whether it ran, distinct
+  // from "it ran and found nothing" — an absent `dropCensus` on the store
+  // must never render the same as zero drops.
+  const dropCensus = store.dropCensus;
+  const dropCensusSummary = dropCensus
+    ? {
+        ran: true as const,
+        totalScanned: dropCensus.totalScanned,
+        totalRetained: dropCensus.totalRetained,
+        totalSkipped: dropCensus.totalSkipped,
+        skippedClasses: dropCensus.skippedClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned, knownInSchema: c.knownInSchema })),
+        unknownClasses: dropCensus.unknownClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned })),
+        relClassesSeen: dropCensus.relClassesSeen,
+        relClassesIndexed: dropCensus.relClassesIndexed,
+        unindexedRelClasses: dropCensus.unindexedRelClasses.map((c: CensusClassLike) => ({ type: c.type, scanned: c.scanned })),
+      }
+    : { ran: false as const };
+
   const summary = {
     file: filePath,
     schema: store.schemaVersion,
@@ -47,6 +70,7 @@ export async function infoCommand(args: string[]): Promise<void> {
     parseTime: `${store.parseTime.toFixed(0)}ms`,
     storeys: storeys.map(s => s.name),
     typeCounts,
+    dropCensus: dropCensusSummary,
   };
 
   if (jsonOutput) {
@@ -104,6 +128,31 @@ export async function infoCommand(args: string[]): Promise<void> {
       ['Type', 'Count'],
       otherTypes.map(([name, count]) => [name, count.toLocaleString()]),
     ).split('\n').map(l => '    ' + l).join('\n') + '\n');
+  }
+
+  // Semantic drop census (#4208)
+  if (!dropCensusSummary.ran) {
+    process.stdout.write(`\n  Drop census: did not run (no dropCensus on this store).\n`);
+  } else {
+    process.stdout.write(
+      `\n  Drop census: ${dropCensusSummary.totalScanned.toLocaleString()} scanned, `
+      + `${dropCensusSummary.totalRetained.toLocaleString()} retained, `
+      + `${dropCensusSummary.totalSkipped.toLocaleString()} skipped.\n`
+    );
+    if (dropCensusSummary.skippedClasses.length > 0) {
+      process.stdout.write(`  Skipped classes:\n`);
+      process.stdout.write(formatTable(
+        ['Type', 'Count', 'In schema'],
+        dropCensusSummary.skippedClasses.map((c: { type: string; scanned: number; knownInSchema: boolean }) => [c.type, c.scanned.toLocaleString(), c.knownInSchema ? 'yes' : 'no']),
+      ).split('\n').map(l => '    ' + l).join('\n') + '\n');
+    }
+    if (dropCensusSummary.unindexedRelClasses.length > 0) {
+      process.stdout.write(`  IFCREL* classes seen but not indexed as edges:\n`);
+      process.stdout.write(formatTable(
+        ['Type', 'Count'],
+        dropCensusSummary.unindexedRelClasses.map((c: { type: string; scanned: number }) => [c.type, c.scanned.toLocaleString()]),
+      ).split('\n').map(l => '    ' + l).join('\n') + '\n');
+    }
   }
 
   process.stdout.write('\n');
