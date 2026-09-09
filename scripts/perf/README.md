@@ -910,3 +910,21 @@ distributions directly to the TypeScript entrypoint and retain their provenance.
 `--skip-branch-build` labels its input as supplied distribution, not a verified
 current-commit build. The wrapper retains the temporary base through child exit
 and then removes it while preserving the child failure status.
+
+### Appearance dependency validation: immutable source byte scan (#4243)
+
+The Apply CPU profile identified effective dependency capture and repeated overlay
+copies as the dominant main-thread work. Unchanged source rows already use
+immutable markers in history checkpoints; decoding, rewriting and re-encoding
+large coordinate rows only to extract references therefore adds no validation
+information. Read those non-binding rows with the canonical source-byte scanner.
+Keep edited, authored, retyped and inverse-binding rows on the effective STEP
+writer path, with unchanged byte/reference budgets and compressed-source support.
+
+Three interleaved fresh-browser Convento pairs showed a consistent end-to-end
+Apply improvement when combined with removing nested appearance transactions.
+This is a combined result, not an isolated speedup for the scanner. Geometry,
+UVs, owner identity, Undo/Redo and the untouched federated model were checked;
+the remaining main-thread stall still fails the intended smoothness requirement.
+Do not treat fewer copies or a faster helper microbenchmark as acceptance: retain
+the paired interaction measurement and continue profiling transaction preparation.
