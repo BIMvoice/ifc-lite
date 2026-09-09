@@ -27,6 +27,25 @@ scripts/perf/flame.sh tests/models/ara3d/schependomlaan.ifc
 
 Fetch a fixture first if missing: `pnpm fixtures ara3d/schependomlaan.ifc`.
 
+## Canonical appearance provenance (#4243)
+
+Item-identified geometry now retains its canonical triangle-order identity at
+WASM extraction. A production-browser worker-load A/B against the same Rust
+runtime found a small median increase within the baseline run spread on the
+public AC20-FZK-Haus fixture; this is not an optimization or a speedup claim.
+All measured geometry/color/UV fingerprints and mesh/triangle counts matched.
+The additional metadata reuses existing index arrays, with no extra geometry
+buffer or transfer at extraction. Streaming fragments can retain an unsplit
+source index array; that memory lifetime still requires explicit downstream
+ownership and large-model qualification.
+
+The measurement boundary was completed metadata plus geometry worker output,
+with fresh Chromium processes and empty model caches. It did not measure
+renderer readiness: the stock combined viewer-readiness experiment encountered
+a baseline first-load viewport initialization race. Those failed samples were
+retained and excluded, not treated as successful loads. The lesson is to name
+and qualify the measured boundary before interpreting small load-time deltas.
+
 ## The native probe (`perf_probe`)
 
 `rust/processing/examples/perf_probe.rs`, wrapped by `probe.sh`. It drains the
@@ -910,3 +929,36 @@ distributions directly to the TypeScript entrypoint and retain their provenance.
 `--skip-branch-build` labels its input as supplied distribution, not a verified
 current-commit build. The wrapper retains the temporary base through child exit
 and then removes it while preserving the child failure status.
+
+### Prepared-overlay comparison ownership (#4243)
+
+Compare a private borrowed overlay descriptor synchronously against the detached
+checkpoint. Cloning the live overlay solely to compare it adds allocation while
+providing no additional isolation; original/draft/prepared/publication snapshots
+remain deep copies. Cyclic escaped values, skip-history edits and rollback
+rejection remain covered. A fresh real Convento Apply profile with this change
+and the earlier command/dependency changes still locates substantial synchronous
+work in dependency scanning and authored-data/history construction plus retained
+snapshots. This single sampled run does not establish an isolated improvement
+for comparison-only clone removal. Keep ownership guards while investigating
+preparation outside the Apply interaction. The profile, timing, summary and
+exact source/runtime hashes are in
+`docs/architecture/evidence/appearance/appearance-apply-after-comparison-*`.
+
+### Appearance dependency validation: immutable source byte scan (#4243)
+
+The Apply CPU profile identified effective dependency capture and repeated overlay
+copies as the dominant main-thread work. Unchanged source rows already use
+immutable markers in history checkpoints; decoding, rewriting and re-encoding
+large coordinate rows only to extract references therefore adds no validation
+information. Read those non-binding rows with the canonical source-byte scanner.
+Keep edited, authored, retyped and inverse-binding rows on the effective STEP
+writer path, with unchanged byte/reference budgets and compressed-source support.
+
+Three interleaved fresh-browser Convento pairs showed a consistent end-to-end
+Apply improvement when combined with removing nested appearance transactions.
+This is a combined result, not an isolated speedup for the scanner. Geometry,
+UVs, owner identity, Undo/Redo and the untouched federated model were checked;
+the remaining main-thread stall still fails the intended smoothness requirement.
+Do not treat fewer copies or a faster helper microbenchmark as acceptance: retain
+the paired interaction measurement and continue profiling transaction preparation.
