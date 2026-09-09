@@ -1,6 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import { prepareAppearanceSerialization } from '../../lib/appearance/serialization.js';
+import { packagePortableIfc, portableIfcDownload } from '../../lib/export/portable-ifc.js';
 
 import type { StoreApi } from './types.js';
 import type { EntityRef, EntityData, PropertySetData, QuantitySetData, ExportBackendMethods } from '@ifc-lite/sdk';
@@ -352,10 +354,11 @@ export function createExportAdapter(store: StoreApi): ExportBackendMethods {
       const hiddenEntityIds = visibleOnly ? visibilityFilters.hiddenEntityIds : new Set<number>();
       const isolatedEntityIds = visibleOnly ? visibilityFilters.isolatedEntityIds : null;
 
-      const exporter = new StepExporter(
-        model.ifcDataStore,
+      const serialized = prepareAppearanceSerialization(
+        modelId, model.ifcDataStore,
         options.includeMutations === false ? undefined : getMutationViewForModel(store, modelId) ?? undefined,
       );
+      const exporter = new StepExporter(model.ifcDataStore, serialized.view);
       // Include georeferencing mutations if present
       const georefMutations = options.includeMutations !== false
         ? state.georefMutations?.get(modelId) ?? undefined
@@ -385,7 +388,7 @@ export function createExportAdapter(store: StoreApi): ExportBackendMethods {
         scheduleIsEdited: state.scheduleIsEdited === true,
         scheduleSourceModelId: state.scheduleSourceModelId ?? null,
       });
-      return spliced.content;
+      return packagePortableIfc(modelId, spliced.content, serialized.resources).content;
     },
 
     download(content: string | Uint8Array, filename: string, mimeType?: string) {
@@ -405,7 +408,8 @@ export function createExportAdapter(store: StoreApi): ExportBackendMethods {
       const safe = ext
         ? buildExportFilename(stem, ext)
         : sanitizeFilename(filename, { fallback: 'export' });
-      triggerDownload(content, safe, mimeType ?? 'text/plain');
+      const portable = portableIfcDownload(content, safe, mimeType ?? 'text/plain');
+      triggerDownload(content, portable.filename, portable.mime);
       return undefined;
     },
   };
