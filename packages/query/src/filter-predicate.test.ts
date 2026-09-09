@@ -56,6 +56,47 @@ describe('compareFilterValue', () => {
     expect(compareFilterValue(5, '>', '3')).toBe(true);
     expect(compareFilterValue('2', '<', 3)).toBe(true);
   });
+
+  // A numeric operator against a non-numeric `expected` coerces through
+  // `Number('abc')` -> `NaN`, and every comparison against `NaN` is `false`.
+  // That is defensible (a caller error should not silently pass), but it had
+  // no pinning test before this — #4094 touched this function to add
+  // `matches`, so it is pinned here too.
+  it('a numeric operator against a non-numeric expected value is false, not a throw', () => {
+    expect(compareFilterValue(5, '>', 'abc')).toBe(false);
+    expect(compareFilterValue(5, '<', 'abc')).toBe(false);
+    expect(compareFilterValue(5, '>=', 'abc')).toBe(false);
+    expect(compareFilterValue(5, '<=', 'abc')).toBe(false);
+  });
+
+  describe('matches (regex)', () => {
+    it('tests the stored value against the pattern', () => {
+      expect(compareFilterValue('WT01-Wall', 'matches', '^WT01')).toBe(true);
+      expect(compareFilterValue('WT02-Wall', 'matches', '^WT01')).toBe(false);
+    });
+
+    it('is case-sensitive, unlike contains', () => {
+      expect(compareFilterValue('REI60', 'matches', '^rei')).toBe(false);
+      expect(compareFilterValue('rei60', 'matches', '^rei')).toBe(true);
+    });
+
+    it('coerces a non-string actual value before testing', () => {
+      expect(compareFilterValue(60, 'matches', '^\\d+$')).toBe(true);
+      expect(compareFilterValue(true, 'matches', '^true$')).toBe(true);
+    });
+
+    it('does not boolean-normalize: a pattern can target the raw STEP token', () => {
+      // If `matches` normalized booleans first (like every other operator
+      // does), `.T.` would become the string `'true'` before the regex ever
+      // ran, and a pattern written against the raw STEP spelling would never
+      // match a boolean-typed actual value.
+      expect(compareFilterValue('.T.', 'matches', '^\\.T\\.$')).toBe(true);
+    });
+
+    it('an invalid pattern does not throw -- it matches nothing', () => {
+      expect(compareFilterValue('anything', 'matches', '[unterminated')).toBe(false);
+    });
+  });
 });
 
 /**
