@@ -1,7 +1,7 @@
 {
-  "name": "@ifc-lite/extensions",
-  "version": "0.6.0",
-  "description": "Extension manifest, capability grammar, and slot registry for ifc-lite user customization",
+  "name": "@ifc-lite/regex-guard",
+  "version": "0.1.0",
+  "description": "A shared, dependency-free guard against catastrophic-backtracking (ReDoS) regex patterns compiled from untrusted input",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -10,22 +10,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./node": {
-      "import": "./dist/node.js",
-      "types": "./dist/node.d.ts"
-    },
-    "./capability": {
-      "import": "./dist/capability/index.js",
-      "types": "./dist/capability/index.d.ts"
-    },
-    "./when": {
-      "import": "./dist/when/index.js",
-      "types": "./dist/when/index.d.ts"
-    },
-    "./bundle": {
-      "import": "./dist/bundle/index.js",
-      "types": "./dist/bundle/index.d.ts"
     }
   },
   "scripts": {
@@ -33,12 +17,6 @@
     "typecheck": "node ../../scripts/typecheck-tests.mjs",
     "dev": "pnpm exec tsc --watch",
     "test": "vitest run"
-  },
-  "dependencies": {
-    "@ifc-lite/regex-guard": "workspace:^",
-    "acorn": "^8.18.0",
-    "acorn-walk": "^8.3.0",
-    "fflate": "^0.8.2"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
@@ -50,18 +28,16 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/LTplus-AG/ifc-lite.git",
-    "directory": "packages/extensions"
+    "directory": "packages/regex-guard"
   },
   "homepage": "https://ifclite.dev/docs/",
   "bugs": "https://github.com/LTplus-AG/ifc-lite/issues",
   "keywords": [
     "ifc",
     "bim",
-    "extensions",
-    "manifest",
-    "capability",
-    "sandbox",
-    "ai"
+    "regex",
+    "redos",
+    "security"
   ],
   "publishConfig": {
     "access": "public"
