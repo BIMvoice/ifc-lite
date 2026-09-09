@@ -6621,6 +6621,8 @@
     "decideTimingMode: function",
     "decodePickSample: function",
     "deriveSkyGradient: function",
+    "equivalentAppearanceGeometry: function",
+    "expandAppearanceCorners: function",
     "federationRegistry: const",
     "frameTotalMs: function",
     "hasTimestampQueryFeature: function",
