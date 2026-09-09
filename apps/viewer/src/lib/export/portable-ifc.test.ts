@@ -100,3 +100,16 @@ it('places authored images relative to the nested IFC path and retains raw STEP 
   assert.throws(() => assertPortableMergeSupported(['model']), /Export each model separately/);
   assert.deepEqual(packagePortableIfc('plain', source), { content: source, ext: 'ifc', mime: 'text/plain' });
 });
+
+// #4243: an IFCXML source path must not mislabel newly serialized STEP bytes.
+it('writes STEP exports from IFCXML archives with an IFC suffix in the same directory', async () => {
+  const resources = { exportResources: () => ({ modelPath: 'nested/model.IFCXML', resources: new Map([['nested/textures/Brick.PNG', png()]]) }) };
+  for (const artifact of [packagePortableIfc('xml', source, resources), await packagePortableIfcAsync('xml', source, resources)]) {
+    assert.ok(artifact.content instanceof Uint8Array);
+    const archive = await unwrapIfcZipWithResources(new Uint8Array(artifact.content).buffer);
+    assert.equal(archive.modelPath, 'nested/model.ifc');
+    assert.deepEqual(archive.originalResources.get('nested/textures/Brick.PNG'), png());
+    const parsed = await new IfcParser().parseColumnar(archive.model);
+    assert.ok(parsed.entityIndex.byId.has(15));
+  }
+});

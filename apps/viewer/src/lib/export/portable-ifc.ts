@@ -17,7 +17,8 @@ function safePath(path: string): string {
 function entries(modelId: string, content: string | Uint8Array, source: Resources): Zippable | null {
   const archive = source.exportResources(modelId);
   if (!archive.resources.size) return null;
-  const modelPath = safePath(archive.modelPath ?? 'model.ifc');
+  // STEP serialization keeps the source directory, never its IFCXML suffix.
+  const modelPath = safePath(archive.modelPath ?? 'model.ifc').replace(/\.ifcxml$/i, '.ifc');
   const result: Zippable = Object.create(null);
   result[modelPath] = [typeof content === 'string' ? strToU8(content) : content, { level: 6 }];
   for (const [path, bytes] of archive.resources) {

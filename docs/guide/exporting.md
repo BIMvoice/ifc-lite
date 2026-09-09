@@ -804,3 +804,6 @@ await saveFile('entities.csv', csv);
 
 - [Query Guide](querying.md) - Filter data before export
 - [API Reference](../api/typescript.md) - Complete API docs
+
+STEP exports from an IFCXML archive keep the model entry’s directory but use an
+`.ifc` suffix, so archive filenames agree with the serialized format.
