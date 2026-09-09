@@ -243,3 +243,29 @@ it('keeps metadata-only and instanced-only IFC originals, but releases failed pl
   assert.equal(bitmap.closes, 1, 'failed placeholders and removed models must not leak a pending source owner');
   useViewerStore.getState().clearAllModels();
 });
+
+// #4261: geometry completes before primary metadata, which finalizes in background.
+it('holds images until delayed metadata finalization and releases rejected or removed loads', async () => {
+  for (const outcome of ['success', 'partial', 'reject', 'remove'] as const) {
+    const bitmap = image();
+    const models = new ModelAppearanceAssets(new AppearanceAssetInventory({ decode: async () => bitmap }));
+    const load = models.begin(outcome);
+    await load.decode(archive());
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const finalization = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    let model = { ...fixtureModel(outcome), ifcDataStore: null as ReturnType<typeof fixtureModel>['ifcDataStore'] };
+    const settled = load.finishAfter(finalization, () => model);
+    assert.equal(load.finishAfter(Promise.resolve(), () => model), settled, 'completion registration is once-only');
+    load.finishForModel(model); // The canonical loader's early finally.
+    assert.equal(bitmap.closes, 0, 'geometry completion cannot close an image still used by the viewport');
+    assert.throws(() => models.exportOriginals(outcome), /still loading/);
+    if (outcome === 'remove') { models.remove(outcome); assert.equal(bitmap.closes, 1); }
+    if (outcome !== 'reject') model = fixtureModel(outcome);
+    if (outcome === 'reject' || outcome === 'partial') reject(new Error('metadata failed')); else resolve();
+    await settled;
+    assert.equal(models.exportOriginals(outcome).resources.size, outcome === 'success' || outcome === 'partial' ? 1 : 0);
+    models.clear();
+    assert.equal(bitmap.closes, 1);
+  }
+});

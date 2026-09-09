@@ -1376,15 +1376,14 @@ export function useIfcLoader() {
       // Default path: parser runs in a Web Worker via WorkerParser, both
       // workers + main share the same SharedArrayBuffer source, and the
       // main thread never blocks on parse.
-      // Fallback: in-process IfcParser.parseColumnar (the previous default)
-      // — used when cross-origin isolation is missing or the worker spawn
-      // fails (auto-fallback inside the catch).
+      // Fall back to main-thread parsing when isolation or worker startup fails.
       let resolveDataStore: (dataStore: IfcDataStore) => void;
       let rejectDataStore: (err: unknown) => void;
       const dataStorePromise = new Promise<IfcDataStore>((resolve, reject) => {
         resolveDataStore = resolve;
         rejectDataStore = reject;
       });
+      if (target.kind === 'primary') void appearanceLoad?.finishAfter(dataStorePromise, () => useViewerStore.getState().models.get(modelId));
 
       const onPartialDataStore = (partialStore: IfcDataStore) => {
         if (loadSessionRef.current !== currentSession) return;
@@ -2050,6 +2049,7 @@ export function useIfcLoader() {
                   });
                 }
               });
+              if (target.kind === 'federated') void appearanceLoad?.finishAfter(finalizePromise, () => useViewerStore.getState().models.get(modelId));
               break;
           }
         }

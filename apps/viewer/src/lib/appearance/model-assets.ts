@@ -32,6 +32,7 @@ export class ModelAppearanceAssets<B extends AppearanceBitmap = ImageBitmap> {
     const controller = new AbortController();
     const images: ModelImages = { paths: new Map(), refused: [], incomplete: false };
     let finished = false;
+    let finalizing: Promise<void> | undefined;
     const cancel = () => {
       if (finished) return;
       finished = true;
@@ -67,9 +68,25 @@ export class ModelAppearanceAssets<B extends AppearanceBitmap = ImageBitmap> {
         }
         return bitmaps.size ? bitmaps : null;
       },
+      /** The primary loader returns before its background metadata finalizer. */
+      finishAfter: (finalization: Promise<unknown>, getModel: () => { ifcDataStore: IfcDataStore | null } | undefined): Promise<void> => {
+        if (finalizing) return finalizing;
+        if (finished) return Promise.resolve();
+        const finishCurrentModel = () => {
+          if (!finished) lease.finish(getModel()?.ifcDataStore != null);
+        };
+        finalizing = finalization.then(finishCurrentModel, error => {
+          console.warn('[textures] Appearance load finalization failed:', error);
+          finishCurrentModel(); // A retained partial IFC source is still exportable.
+        }).catch(error => {
+          console.warn('[textures] Cannot retain finalized appearance resources:', error);
+          cancel();
+        });
+        return finalizing;
+      },
       /** Model-local parsed source remains exportable without any flat meshes. */
       finishForModel: (model: { ifcDataStore: IfcDataStore | null } | undefined) => {
-        lease.finish(model?.ifcDataStore != null);
+        if (!finalizing) lease.finish(model?.ifcDataStore != null);
       },
       /** Retain only while a loaded model owns it. */
       finish: (modelExists: boolean) => {
