@@ -71,6 +71,7 @@ import { searchTeardown } from './slices/searchSlice.teardown.js';
 import { annotationsTeardown } from './slices/annotationsSlice.teardown.js';
 import { addElementTeardown } from './slices/addElementSlice.teardown.js';
 import { splitToolTeardown } from './slices/splitToolSlice.js';
+import { modelPlacementTeardown } from './slices/modelPlacementSlice.js';
 import { pointCloudTeardown } from './slices/pointCloudSlice.js';
 import { zonesTeardown } from './slices/zonesSlice.js';
 
@@ -110,6 +111,7 @@ export const viewerTeardownRegistry: readonly AnySliceTeardown[] = createTeardow
   addElementTeardown,
   splitToolTeardown,
   pointCloudTeardown,
+  modelPlacementTeardown,
   zonesTeardown,
 ]);
 
