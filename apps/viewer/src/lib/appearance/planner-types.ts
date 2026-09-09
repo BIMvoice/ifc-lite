@@ -40,6 +40,8 @@ export interface AppearancePlan extends AppearanceEntityPlan {
     sourceIndices: number[];
     /** Final target topology becomes provenance after Apply, including changed UV seams. */
     targetIndices: number[];
+    /** Final canonical vertex pool, including unused slots left by triangle cleanup. */
+    targetVertexCount: number;
     /** UV pairs in canonical triangle-corner order, before fragment remapping. */
     previewCornerUvs: number[];
     /** Canonical target shading normals in renderer Y-up triangle-corner order. */
