@@ -606,6 +606,13 @@ export class IfcAPI {
      */
     parseSymbolicRepresentations(content: string): SymbolicRepresentationCollection;
     /**
+     * Plan image/UV edits against an effective IFC snapshot without mutating it.
+     * JSON input uses AppearanceRequest; output is UTF-8 AppearancePlan JSON.
+     * Call from a worker, then validate sourceRevision and allocator before an
+     * atomic host commit. Preview UVs describe an unsplit canonical mesh item.
+     */
+    planAppearance(content: Uint8Array, request_json: string): Uint8Array;
+    /**
      * Process geometry for a subset of pre-scanned entities → flat
      * MeshCollection. Takes raw bytes + pre-pass data from buildPrePassOnce.
      * Thin wrapper over [`IfcAPI::produce_batch`]; converts each produced mesh
@@ -2026,6 +2033,7 @@ export interface InitOutput {
     readonly ifcapi_parseGridAxes: (a: number, b: number, c: number) => number;
     readonly ifcapi_parseGridLines: (a: number, b: number, c: number) => number;
     readonly ifcapi_parseSymbolicRepresentations: (a: number, b: number, c: number) => number;
+    readonly ifcapi_planAppearance: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly ifcapi_processGeometryBatch: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number) => number;
     readonly ifcapi_processGeometryBatchFromSource: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number) => number;
     readonly ifcapi_processGeometryBatchInstanced: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number, x: number, y: number, z: number, a1: number, b1: number, c1: number) => void;
