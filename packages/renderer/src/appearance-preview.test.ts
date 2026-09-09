@@ -532,6 +532,7 @@ describe('flat batch appearance ownership (#4243)', () => {
       [0, 0, 1, 0, 1, 1, 0.5, 0.5, 0.5, 1, 0, 1],
       new Uint32Array([0, 1, 2, 3, 4, 5]),
       new Float32Array(18).fill(0.0005),
+      6,
     );
     api.update(token, [
       { ...expanded, texture: mesh(0, new Uint8Array(4)).texture },
