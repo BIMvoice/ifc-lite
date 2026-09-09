@@ -15,12 +15,36 @@ import {
 
 export type ColumnarEntityInput = EntityRef[] | ScannedEntityColumns;
 
+// Fail loud, once, if the schema registry cannot derive IfcRoot descent at
+// all — a broken/empty generated registry would otherwise make every
+// `isSubtypeOfAny(upper, ROOT_TYPES)` check silently return false, and
+// every non-product, non-group IfcRoot entity would fall to CAT_SKIP with
+// no error (#4204). IFCWALL is a stand-in for "the registry loaded and its
+// inheritance chain reaches the root at all", not a claim about walls
+// specifically.
+let rootDerivationVerified = false;
+function assertRootDerivationIsLive(): void {
+  if (rootDerivationVerified) return;
+  const chain = getInheritanceChain('IFCWALL').map(c => c.toUpperCase());
+  if (!chain.includes('IFCROOT')) {
+    throw new Error(
+      'IfcRoot-descendant retention (#4204) derives from the schema registry, and its ' +
+      "sanity check failed: getInheritanceChain('IFCWALL') did not reach IFCROOT " +
+      `(got: [${chain.join(', ')}]). This would silently CAT_SKIP every IfcRoot ` +
+      'descendant instead of retaining it — refusing to parse rather than drop entities silently.'
+    );
+  }
+  rootDerivationVerified = true;
+}
+
 /** Shared categorization for scanned objects and pre-pass columns. #3985 */
 export async function prepareColumnarEntities(
   input: ColumnarEntityInput,
   deferPropertyAtomIndex: boolean,
   yieldIfNeeded: () => Promise<void>,
 ) {
+  assertRootDerivationIsLive();
+
   // Single pass: build byType index AND categorize entities simultaneously.
   // Uses a type-name cache to avoid calling .toUpperCase() on 4.4M refs
   // (only ~776 unique type names in IFC4).
@@ -54,14 +78,17 @@ export async function prepareColumnarEntities(
       'IFCDOCUMENTINFORMATION', 'IFCDOCUMENTREFERENCE',
   ]);
 
-  // Schema-driven inclusion: every IfcProduct subtype belongs in the
-  // EntityTable. The previous hardcoded enumeration of IFC4 building-
-  // element leaves (IFCWALL, IFCSLAB, …) and IFC4x3 infrastructure
-  // leaves (IFCREFERENT, IFCSIGNAL, IFCALIGNMENT, IFCPAVEMENT, …) drifted
-  // with every schema bump — new entities silently became CAT_SKIP and
-  // disappeared from the hierarchy panel. The generated schema registry
-  // already knows the full inheritance chain, so use it.
-  const RELEVANT_PRODUCT_ROOTS = new Set(['IFCPRODUCT']);
+  // Schema-driven inclusion: every IfcRoot descendant belongs in the
+  // EntityTable — not just IfcProduct subtypes. The previous rule tested
+  // IFCPRODUCT specifically plus an `IFCREL` name-prefix test, so anything
+  // rooted but neither a product nor named "IfcRel*" (IfcTask, IfcActor,
+  // IfcCostItem, IfcResource, IfcStructural*, IfcProjectLibrary,
+  // IfcPropertySetTemplate, …) fell through to CAT_SKIP and stayed
+  // unaddressable: `getGlobalId`/`getTypeName` answered '' / 'Unknown' for
+  // them (#4204). IfcRelationship is itself an IfcRoot subtype, so testing
+  // the inheritance chain against IFCROOT directly makes the prefix test
+  // redundant too — this one rule replaces both.
+  const ROOT_TYPES = new Set(['IFCROOT']);
 
   // IfcGroup family (IfcZone, IfcSystem, IfcDistributionSystem,
   // IfcBuildingSystem, IfcDistributionCircuit, …). These are NOT
@@ -101,8 +128,7 @@ export async function prepareColumnarEntities(
       else if (isSubtypeOfAny(upper, GROUP_ROOTS)) cat = CAT_GROUP;
       else if (
           RELEVANT_NON_PRODUCT_HELPERS.has(upper)
-          || isSubtypeOfAny(upper, RELEVANT_PRODUCT_ROOTS)
-          || upper.startsWith('IFCREL')
+          || isSubtypeOfAny(upper, ROOT_TYPES)
       ) cat = CAT_RELEVANT;
       else cat = CAT_SKIP;
       typeCategoryCache.set(type, cat);
