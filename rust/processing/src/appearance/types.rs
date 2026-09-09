@@ -74,6 +74,9 @@ pub struct AppearanceItem {
     pub source_indices: Vec<u32>,
     /// Final canonical target topology; becomes provenance after Apply.
     pub target_indices: Vec<u32>,
+    /// Canonical target vertex pool size; removed degenerate triangles can leave
+    /// unused vertices, so the maximum index is not bounded by corner count.
+    pub target_vertex_count: usize,
     /// UV pairs in triangle-corner order, with GPU V flip. Fragment consumers
     /// remap canonical corner slots and expand seams without moving geometry.
     pub preview_corner_uvs: Vec<f32>,
