@@ -296,9 +296,19 @@ const result = await parseAuto(zipBuffer);
 const ifcBuffer = await unwrapIfcZip(zipBuffer);
 ```
 
-Referenced resources inside the archive (textures, documents) are not
-extracted — only the model file's bytes. An archive with zero or more than
-one `.ifc`/`.ifcxml` entry throws rather than guessing which one to load.
+`unwrapIfcZip` returns only model bytes. For textured archives, call
+`unwrapIfcZipWithResources`: its `resources` map resolves PNG/JPEG images by
+lowercased basename (first entry wins), while `originalResources` preserves
+each archive path using the same byte arrays. `modelPath` identifies the IFC
+entry; keep that path and the original image paths when repackaging a model
+whose texture references are relative. Non-zip input returns empty resource
+maps and no `modelPath`. Image extraction applies per-entry and aggregate
+size/count limits. `resourcesIncomplete` is true when those budgets omit at
+least one image; a portable exporter must report this rather than claim all
+resources were preserved. Other resource formats are not extracted.
+
+An archive with zero or more than one `.ifc`/`.ifcxml` entry throws rather
+than guessing which one to load.
 
 ### Direct IFCX Parsing
 
