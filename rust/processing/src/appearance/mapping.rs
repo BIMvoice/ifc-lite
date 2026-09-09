@@ -10,7 +10,7 @@ fn rows<const N: usize>(value: Option<&A>) -> Result<Vec<[f64; N]>, String> {
     let list = value
         .and_then(A::as_list)
         .ok_or("Missing coordinate list")?;
-    if list.is_empty() || list.len() > 1_000_000 {
+    if list.is_empty() || list.len() > super::budget::MAX_COORDINATE_ROWS {
         return Err("Coordinate count outside appearance budget".into());
     }
     list.iter().map(numbers).collect()

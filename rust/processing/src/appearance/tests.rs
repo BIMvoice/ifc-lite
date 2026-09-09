@@ -450,3 +450,22 @@ fn issue_4243_embedded_blob_header_is_budgeted_before_pixel_decode() {
     let source = CONTROLLED_IFC.replace("IFCIMAGETEXTURE(.T.,.F.,$,$,$,'textures/wood.jpg')", &format!("IFCBLOBTEXTURE(.T.,.F.,$,$,$,'PNG',\"{binary}\")"));
     assert!(matches!(plan_appearance(source.as_bytes(), &request(vec![10])), Err(reason) if reason.contains("source texture budget")));
 }
+
+#[test]
+fn issue_4243_per_item_coordinate_limit_exhausts_the_whole_plan_budget() {
+    use super::budget::{PlanBudget, BUDGET_ERROR, MAX_COORDINATE_ROWS};
+    // Existing UVs can reference just three points in a much larger point list.
+    // Such an item must exhaust the request before row decoding can downgrade
+    // its resource failure to an exclusion and retain earlier prepared items.
+    let mut budget = PlanBudget::default();
+    budget.reserve(3, 1, 3).unwrap();
+    assert_eq!(
+        budget.reserve(MAX_COORDINATE_ROWS + 1, 1, 3),
+        Err(BUDGET_ERROR.into())
+    );
+    assert!(budget.exhausted);
+
+    let mut boundary = PlanBudget::default();
+    assert!(boundary.reserve(MAX_COORDINATE_ROWS, 1, 3).is_ok());
+    assert!(!boundary.exhausted);
+}
