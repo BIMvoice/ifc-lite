@@ -17,7 +17,7 @@ describe('bounded IFCX image transport (#4325)', () => {
 
   it('retains original PNG bytes separately from decoded pixels without recompression', () => {
     // A complete 1x1 PNG; the original carrier is archival and is not decoded by this codec.
-    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1ZkAAAAASUVORK5CYII='), (char) => char.charCodeAt(0));
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII='), (char) => char.charCodeAt(0));
     const original = { mimeType: 'image/png' as const, bytes };
     const image = encodeIfcxImage({ width: 1, height: 1, rgba: new Uint8Array([255, 255, 255, 255]), repeatS: false, repeatT: false, original });
     const decoded = createIfcxImageDecoder()('image', image.value);

@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { IfcParser } from '@ifc-lite/parser';
-import { parseIfcx, type IfcxFile } from '@ifc-lite/ifcx';
+import { parseIfcx, parseFederatedIfcx, type IfcxFile } from '@ifc-lite/ifcx';
 import type { GeometryResult, MeshData } from '@ifc-lite/geometry';
 import { Ifc5Exporter } from './ifc5-exporter.js';
 import { ALL_OFFICIAL_SCHEMAS, validateValue } from './__fixtures__/ifc5-official-schemas.js';
@@ -54,6 +54,8 @@ describe('IFCX textured fragment transport (#4325)', () => {
     expect(file.data.filter((node) => node.attributes?.['ifclite::image::v1'])).toHaveLength(1);
     const reopened = await parseIfcx(new TextEncoder().encode(result.content).buffer);
     expect(reopened.meshes).toHaveLength(3);
+    const layered = await parseFederatedIfcx([{ name: 'appearance.ifcx', buffer: new TextEncoder().encode(result.content).buffer }]);
+    expect(layered.meshes).toHaveLength(3);
     const textured = reopened.meshes.filter((part) => part.texture);
     expect(textured).toHaveLength(2);
     expect(textured[0].texture!.rgba).toEqual(pixels);

@@ -11,6 +11,7 @@ export class Ifc5AppearanceWriter {
   private readonly imagePaths = new Map<string, string>();
   private readonly sourcePaths = new WeakMap<object, Map<string, string>>();
   private imageBytes = 0;
+  private nextFragment = 0;
 
   constructor(private readonly occupiedPaths: Set<string>, private readonly originals?: ReadonlyMap<string, IfcxEncodedImage>) {}
 
@@ -71,7 +72,7 @@ export class Ifc5AppearanceWriter {
   ): IfcxNode[] {
     const children = owner.children ??= {};
     return meshes.map((mesh, index) => {
-      const path = this.uniquePath(`${owner.path}/ifclite-mesh-${index}`);
+      const path = this.uniquePath(`ifclite-mesh-${this.nextFragment++}`);
       let name = `Appearance ${index + 1}`;
       while (Object.hasOwn(children, name)) name += '_';
       children[name] = path;
