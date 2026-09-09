@@ -807,3 +807,9 @@ await saveFile('entities.csv', csv);
 
 STEP exports from an IFCXML archive keep the model entry’s directory but use an
 `.ifc` suffix, so archive filenames agree with the serialized format.
+
+### Cleaning up authored appearance resources
+
+`planAuthoredResourceCleanup(dataStore, mutationView, candidateIds, protectedValues)` returns `{ entityIds, retainedImageUris }`: a deletion plan for explicitly owned, overlay-created appearance resource entities plus the effective image URLs that survive it. It follows the same effective positional and named reference overrides as STEP export. Source-backed resources, entities outside the candidate set, and live inverse style/texture bindings are retained. The URI set includes independent/source image entities that copy an authored URL, even after its original image entity is removed. Values and references use the existing STEP serializers, retype and attribute-override helpers, with positional overrides taking precedence as they do in the exported file. The optional `protectedValues` iterable carries entity references and saved attribute values needed by Undo/Redo; these references keep the corresponding resource graph alive.
+
+The helper is pure: apply `entityIds` through an atomic mutation transaction, then release image bytes only after that transaction succeeds. Reconcile outside history publication and advance the model revision after deletion. It refuses oversized candidate/reference walks without returning a partial plan. This is authored-resource housekeeping, not a general imported-model cleanup pass.
