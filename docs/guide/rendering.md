@@ -70,11 +70,13 @@ animate();
 
 ## Appearance triangle mapping
 
-`expandAppearanceCorners(mesh, sourceIndices, cornerUvs, targetIndices, targetCornerNormals)` binds
+`expandAppearanceCorners(mesh, sourceIndices, cornerUvs, targetIndices, targetCornerNormals, targetVertexCount)` binds
 canonical authored UVs to a mesh or streamed fragment. It validates the source
 topology against `mesh.appearanceSource`, preserves exact triangle positions, installs canonical target corner normals in renderer Y-up,
 and expands welded vertices when individual corners need different UVs. The
 returned mesh records the target canonical topology for a subsequent edit.
+The canonical target vertex count bounds index references; retained unused vertices
+mean that triangle-corner count is not a valid vertex-pool bound.
 Missing or stale provenance throws; matching array lengths alone are insufficient.
 
 `equivalentAppearanceGeometry(before, after)` checks exact triangle-corner
