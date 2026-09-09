@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import { packagePortableIfcAsync, assertPortableMergeSupported } from '@/lib/export/portable-ifc';
 
 /**
  * Export Dialog for IFC export with property mutations
@@ -369,6 +370,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
     try {
       // Handle merged export of all models (STEP only, not IFC5)
       if (!isIfc5 && exportScope === 'merged' && !changesOnly) {
+        assertPortableMergeSupported(models.keys());
         const hydratedModels = await Promise.all(Array.from(models.values()).map(async (model) => ({
           model,
           dataStore: await ensureModelExportReady(model.id),
@@ -468,7 +470,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
           ? withInstancedMeshes(
               selectedModel.geometryResult,
               federatedModel
-                ? { idOffset: federatedModel.idOffset ?? 0, maxExpressId: federatedModel.maxExpressId ?? 0 }
+                ? { modelId: federatedModel.id, idOffset: federatedModel.idOffset ?? 0, maxExpressId: federatedModel.maxExpressId ?? 0 }
                 : null,
             )
           : selectedModel.geometryResult;
@@ -579,10 +581,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
 
         setExportProgress(null);
 
-        // Splice pending schedule tasks into the STEP via the shared
-        // helper. Same contract every export surface uses so bugs
-        // can't differ between the dialog, the quick button, and the
-        // SDK adapter.
+        // Shared schedule splice and texture packaging keep all export surfaces consistent.
         const state = useViewerStore.getState();
         const spliced = spliceScheduleIntoExport(result, selectedModelId, selectedModel.ifcDataStore as IfcDataStore, {
           scheduleData: state.scheduleData ?? null,
@@ -591,12 +590,13 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         });
 
         const suffix = visibleOnly ? '_visible' : '_export';
-        downloadFile(spliced.content, `${baseName}${suffix}.ifc`, 'text/plain');
+        const artifact = await packagePortableIfcAsync(selectedModelId, spliced.content);
+        downloadFile(artifact.content, `${baseName}${suffix}.${artifact.ext}`, artifact.mime);
 
         const stepMsg = `Exported ${result.stats.entityCount} entities (${result.stats.modifiedEntityCount} modified)`;
         setExportResult({ success: true, message: stepMsg });
         toast.success(stepMsg);
-        exportedFormat = 'ifc';
+        exportedFormat = artifact.ext;
       }
     } catch (error) {
       console.error('Export failed:', error);
@@ -634,7 +634,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
             Export IFC File
           </DialogTitle>
           <DialogDescription>
-            Export your model with property modifications applied
+            {isIfc5 && !changesOnly ? 'Export model data and geometry, including current workspace placement' : 'Export authored model coordinates and property modifications. Workspace repositioning is saved separately.'}
           </DialogDescription>
         </DialogHeader>
 
