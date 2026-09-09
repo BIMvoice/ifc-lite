@@ -533,7 +533,10 @@ Plans report unsupported products;
 callers must explicitly accept a reduced scope, retain image resources and
 apply the complete IFC edit plan atomically after revalidating the revision and
 allocator. Preview consumers validate source topology and map triangle corners,
-rather than assuming vertex counts establish UV correspondence.
+rather than assuming vertex counts establish UV correspondence. `targetVertexCount`
+is the final canonical vertex-pool bound; removed triangles may leave unused
+vertices before or after the surviving indices. Do not substitute corner count
+or maximum-index-plus-one for this pool size.
 `targetCornerNormals` carries final shading normals in renderer Y-up triangle-corner
 order (`[nx, nz, -ny]` from IFC). Removing UV seams can merge near-coplanar weld
 representatives and change shading normals while every triangle position remains

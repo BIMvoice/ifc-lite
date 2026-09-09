@@ -317,6 +317,16 @@ fn issue_4243_optional_convento_walls() {
         assert!(item.target_corner_normals.iter().all(|v| v.is_finite()));
     }
     eprintln!("Convento planar: {} products, {} items, {} exclusions", req.product_ids.len(), planar.items.len(), planar.exclusions.len());
+    // Actual full-model UI failure: item187 retains vertex27 after cleanup,
+    // while only27 triangle corners remain. The canonical pool is authoritative.
+    req.product_ids = vec![151];
+    let sparse = plan_appearance(&bytes, &req).unwrap();
+    assert!(sparse.exclusions.is_empty(), "{:?}", sparse.exclusions);
+    let item = sparse.items.iter().find(|item| item.geometry_item_id == 187).unwrap();
+    assert!(item.target_indices.iter().any(|&i| i as usize >= item.target_indices.len()));
+    assert!(item.target_indices.iter().all(|&i| (i as usize) < item.target_vertex_count));
+    eprintln!("Convento item187: {} surviving corners, {} canonical vertices", item.target_indices.len(), item.target_vertex_count);
+
 }
 
 fn corner_uvs(mesh: &crate::types::mesh::MeshData) -> Vec<f32> {
@@ -563,4 +573,25 @@ fn issue_4272_canonical_corner_validation_rejects_missing_or_overflowing_slices(
     for (buffer, index) in [(&positions[..], 2), (&positions[..], u32::MAX), (&positions[..2], 0), (&positions[..0], 0)] {
         assert!(canonical::corner_position(buffer, index).is_err());
     }
+}
+
+#[test]
+fn issue_4243_target_vertex_pool_can_exceed_surviving_triangle_corner_count() {
+    // Degenerate cleanup removes the first and last triangles, retaining unused vertices.
+    let source = CONTROLLED_IFC
+        .replace("#34=IFCTRIANGULATEDFACESET(#35,$,.F.,((1,2,3)),$);", "#34=IFCTRIANGULATEDFACESET(#35,$,.F.,((1,2,3),(4,5,6),(7,8,9)),$);")
+        .replace("#35=IFCCARTESIANPOINTLIST3D(((0.,0.,5.),(1.,0.,5.),(0.,1.,5.)));", "#35=IFCCARTESIANPOINTLIST3D(((0.,0.,0.),(1.,0.,0.),(2.,0.,0.),(0.,1.,0.),(1.,1.,0.),(0.,2.,0.),(10.,0.,0.),(11.,0.,0.),(12.,0.,0.)));")
+        .replace("#36=IFCTEXTUREVERTEXLIST(((0.,0.),(1.,0.),(0.,1.)));", "#36=IFCTEXTUREVERTEXLIST(((0.,0.),(1.,0.),(2.,0.),(0.,1.),(1.,1.),(0.,2.),(10.,0.),(11.,0.),(12.,0.)));")
+        .replace("#37=IFCINDEXEDTRIANGLETEXTUREMAP((#20),#34,#36,((3,2,1)));", "#37=IFCINDEXEDTRIANGLETEXTUREMAP((#20),#34,#36,((1,2,3),(4,5,6),(7,8,9)));");
+    let plan = plan_appearance(source.as_bytes(), &request(vec![30])).unwrap();
+    assert!(plan.exclusions.is_empty(), "{:?}", plan.exclusions);
+    let item = &plan.items[0];
+    assert_eq!(item.target_indices.len(), 3);
+    assert!(item.target_indices.iter().any(|&i| i as usize >= item.target_indices.len()), "fixture must retain unused vertex slots: {:?}", item.target_indices);
+    let reopened = crate::process_geometry(apply(&source, &plan).as_bytes());
+    let mesh = reopened.meshes.iter().find(|m| m.express_id == 30).unwrap();
+    assert_eq!(item.target_vertex_count, mesh.positions.len()/3);
+    assert!(item.target_vertex_count > *item.target_indices.iter().max().unwrap() as usize + 1, "unused trailing vertices must also count");
+    assert_eq!(item.target_indices, mesh.indices);
+    assert!(item.target_indices.iter().all(|&i| (i as usize) < item.target_vertex_count));
 }
