@@ -68,6 +68,27 @@ function animate() {
 animate();
 ```
 
+## Appearance triangle mapping
+
+`expandAppearanceCorners(mesh, sourceIndices, cornerUvs, targetIndices, targetCornerNormals, targetVertexCount)` binds
+canonical authored UVs to a mesh or streamed fragment. It validates the source
+topology against `mesh.appearanceSource`, preserves exact triangle positions, installs canonical target corner normals in renderer Y-up,
+and expands welded vertices when individual corners need different UVs. The
+returned mesh records the target canonical topology for a subsequent edit.
+The canonical target vertex count bounds index references; retained unused vertices
+mean that triangle-corner count is not a valid vertex-pool bound.
+Missing or stale provenance throws; matching array lengths alone are insufficient.
+
+`equivalentAppearanceGeometry(before, after)` checks exact triangle-corner
+equivalence, including compressed-to-expanded undo/redo. Its default also checks
+normal equality; `{ allowNormalChanges: true }` permits canonical shading changes
+while still requiring exact positions and corner order. Validate the current
+history state with the strict default before applying such a transition. Both functions consume
+canonical planner data; they do not calculate IFC mapping rules. Callers retain
+ownership of the input arrays and must treat shared geometry/provenance arrays
+as immutable. Expansion allocates one vertex per triangle corner and is an
+explicit authoring operation, outside ordinary model loading.
+
 ## Camera Controls
 
 ### Configuration
