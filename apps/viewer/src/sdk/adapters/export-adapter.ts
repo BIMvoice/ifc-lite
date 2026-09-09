@@ -86,15 +86,11 @@ function normalizeRefs(raw: unknown[]): EntityRef[] {
 }
 
 /**
- * Resolve `sdk.export.ifc()` visibility filters. "Full model" is coverage,
- * not size: `selectedExpressIds` is the whole model only when it has
- * `entityCount` members AND `hasEntity` confirms every one exists --
- * cardinality alone let `entityCount` nonexistent ids pass as "full" and
- * silently export the whole model (reproduced live). Anything short of a
- * verified cover isolates to `selectedExpressIds`. A verified full-model
- * `refs` routes through `resolveExportVisibility()` -- the same resolver
- * ExportDialog/GLBExportDialog use -- so `classFilter`/`selectedStoreys`/
- * `typeVisibility` are honored here too (#4328). */
+ * Resolve `sdk.export.ifc()` visibility filters. "Full model" means coverage, not size: `selectedExpressIds` is
+ * the whole model only when size === `entityCount` and `hasEntity` confirms every id exists -- cardinality alone
+ * let nonexistent ids pass as "full", silently exporting the whole model (reproduced live). Short of that it
+ * isolates to `selectedExpressIds`; a verified full model instead routes through `resolveExportVisibility()`
+ * (ExportDialog/GLBExportDialog's resolver) so `classFilter`/`selectedStoreys`/`typeVisibility` apply too (#4328). */
 export function resolveVisibilityFilterSets(
   state: StoreApi['getState'] extends () => infer T ? T : never,
   modelId: string,
