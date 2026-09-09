@@ -329,4 +329,34 @@ describe("mergeBranch('layer') cannot propagate branch deletions (documented lim
     branch.session.dispose();
     parent.dispose();
   });
+
+  it('does not count an entity as a dropped deletion when the parent also deleted it', async () => {
+    // Load-bearing negative case for the other half of the guard: an
+    // entity present at fork time, deleted on the branch, AND also gone
+    // from the parent by merge time (here because the parent independently
+    // deleted it too) is not a dropped deletion — there is nothing left on
+    // the parent for the branch's deletion to fail to remove. Miscounting
+    // this would over-count `droppedDeletions` for a deletion both sides
+    // agreed on, the same false-alarm failure mode as the fork-time guard
+    // above, just on the parent side of the check.
+    const parent = await createCollabSession({
+      roomId: 'deletion-drop-both-sides-deleted',
+      user: { id: 'louis', name: 'Louis' },
+      provider: 'memory',
+    });
+    parent.transact(() => createEntity(parent.doc, 'wall', { ifcClass: 'IfcWall' }));
+
+    const branch = await forkSession(parent, { name: 'remove-wall-both-sides' });
+    branch.session.transact(() => deleteEntity(branch.session.doc, 'wall'));
+    // Parent independently deletes the same entity before the merge lands.
+    parent.transact(() => deleteEntity(parent.doc, 'wall'));
+
+    const report = mergeBranch(parent, branch, 'layer');
+
+    expect(report.droppedDeletions).toBe(0);
+    expect(entitiesMap(parent.doc).has('wall')).toBe(false);
+
+    branch.session.dispose();
+    parent.dispose();
+  });
 });
