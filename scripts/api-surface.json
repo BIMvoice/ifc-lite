@@ -6502,6 +6502,13 @@
     "normalizeBooleanValue: function",
     "parseSelector: function"
   ],
+  "@ifc-lite/regex-guard": [
+    "MAX_GUARDED_REGEX_PATTERN_LENGTH: const",
+    "UnsafeRegexPatternError: class",
+    "assertGuardedRegexPattern: function",
+    "compileGuardedRegex: function",
+    "hasCatastrophicBacktrackingShape: function"
+  ],
   "@ifc-lite/renderer": [
     "AdapterInfoSnapshot: interface",
     "BVH: class",
