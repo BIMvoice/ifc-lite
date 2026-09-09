@@ -307,3 +307,22 @@ it('reconciles authored definitions while preserving shared originals and cancel
     assert.equal(bitmap.closes, 1);
   }
 });
+
+
+it('filtered serialization preserves imported bytes and live authored leases (#4243)', async () => {
+  const bitmap = image();
+  const inventory = new AppearanceAssetInventory({ decode: async () => bitmap });
+  const models = new ModelAppearanceAssets(inventory);
+  const lease = models.begin('filtered'); await lease.decode(archive()); lease.finish(true);
+  const owner = { kind: 'draft' as const, id: 'filtered-image' };
+  const asset = await inventory.add(png(), { owner });
+  models.registerAuthored('filtered', 'command', [asset.id]);
+  inventory.releaseOwner(owner);
+  const filtered = models.exportResources('filtered', new Set());
+  assert.deepEqual([...filtered.resources.keys()], ['nested/Textures/Wood.PNG']);
+  assert.deepEqual(filtered.resources.get('nested/Textures/Wood.PNG'), png());
+  assert.equal(models.exportResources('filtered').resources.size, 2, 'filtering an archive cannot release its live authored registration');
+  assert.equal(bitmap.closes, 0);
+  models.remove('filtered');
+  assert.equal(bitmap.closes, 1);
+});

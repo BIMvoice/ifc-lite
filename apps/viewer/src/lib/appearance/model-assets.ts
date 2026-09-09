@@ -181,12 +181,15 @@ export class ModelAppearanceAssets<B extends AppearanceBitmap = ImageBitmap> {
     if (commands?.size === 0) this.authored.delete(modelId);
     for (const id of ids ?? []) this.releaseUnused(modelId, id);
   }
-  exportResources(modelId: string): { modelPath?: string; resources: Map<string, Uint8Array> } {
+  exportResources(modelId: string, retainedImageUris?: ReadonlySet<string>): { modelPath?: string; resources: Map<string, Uint8Array> } {
     const result = this.exportOriginals(modelId);
+    const retained = retainedImageUris && new Set([...retainedImageUris].map(textureUrlBasename));
     const folder = result.modelPath?.slice(0, result.modelPath.lastIndexOf('/') + 1) ?? '';
     for (const ids of this.authored.get(modelId)?.values() ?? []) {
       for (const id of ids) {
-        const path = folder + this.getAuthoredUri(modelId, id);
+        const uri = this.getAuthoredUri(modelId, id);
+        if (retained && !retained.has(textureUrlBasename(uri))) continue;
+        const path = folder + uri;
         if (!result.resources.has(path)) result.resources.set(path, this.inventory.encoded(id));
       }
     }

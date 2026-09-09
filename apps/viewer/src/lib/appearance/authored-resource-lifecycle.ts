@@ -67,6 +67,18 @@ export class AuthoredResourceLifecycle {
   }
   clear(): void { for (const id of this.models.keys()) this.remove(id); }
 
+  /** Serialization excludes history roots without changing live ownership. */
+  serializationCandidates(modelId: string, dataStore: IfcDataStore, view: MutablePropertyView): Set<number> {
+    const model = this.models.get(modelId);
+    if (!model) return new Set();
+    if (model.context.dataStore !== dataStore || model.context.view !== view || !model.context.isCurrent()) {
+      throw new Error('Appearance resources belong to a different model revision.');
+    }
+    const result = new Set<number>();
+    for (const command of model.commands.values()) for (const entity of command.created) result.add(entity.expressId);
+    return result;
+  }
+
   private schedule(modelId: string, model: Model): void {
     if (model.queued) return;
     model.queued = true;
