@@ -71,6 +71,13 @@ export class StoreEditor {
     this.view.setExpressIdWatermark(this.maxExistingId);
   }
 
+  /** Stage one synchronous IFC edit; failure publishes no partial overlay (#4243).
+   * Prepare image/worker resources before calling this. Returned entity IDs are
+   * valid after success; the draft editor is detached after this callback. */
+  runAtomic<T>(edit: (draft: StoreEditor) => T): T {
+    return this.view.runAtomic(draft => edit(new StoreEditor(this.store, draft)));
+  }
+
   /**
    * Re-scan the store and bump the express-id watermark if the store has
    * grown since construction (e.g. after lazy index hydration or
@@ -257,6 +264,13 @@ export class StoreEditor {
   /** Look up the overlay record for a freshly-added entity. */
   getNewEntity(expressId: number): NewEntity | null {
     return this.view.getNewEntity(expressId);
+  }
+
+  /** Whether an id resolves to a live source or overlay entity. */
+  hasEntity(expressId: number): boolean {
+    return Number.isSafeInteger(expressId) && expressId > 0 && !this.view.isDeleted(expressId)
+      && (this.view.getNewEntity(expressId) !== null || this.store.entityIndex.byId.has(expressId)
+        || this.store.deferredEntityIndex?.has(expressId) === true);
   }
 
   /** All overlay-created entities, in insertion order. */
