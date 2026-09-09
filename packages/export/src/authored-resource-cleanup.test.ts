@@ -37,6 +37,18 @@ async function exportedEntity(f: Awaited<ReturnType<typeof fixture>>, id: number
   return entity!;
 }
 describe('authored appearance graph cleanup #4243', () => {
+  it('drops unreachable history payloads without serializing them, but bounds reachable payloads (#4243)', async () => {
+    const f = await fixture();
+    const uv = f.editor.addEntity('IfcTextureVertexList', [[]]).expressId;
+    // A hostile SDK payload can exceed the native planner's authored-value cap.
+    // No surviving row refers to this explicitly owned, retired candidate.
+    f.view.getNewEntity(uv)!.attributes[0] = new Array(8_000_001).fill(0);
+    f.candidates.add(uv);
+    expect(f.collect()).toEqual(new Set([f.image, f.texture, f.style, uv]));
+    expect(f.view.getNewEntity(uv)).not.toBeNull();
+    f.editor.setPositionalAttribute(15, 1, [`#${uv}`]);
+    expect(() => f.collect()).toThrow(/attribute budget/);
+  });
   it('never collects imported entities and follows effective source style overrides', async () => {
     const f = await fixture();
     expect(f.collect()).toEqual(new Set([f.image, f.texture, f.style]));
