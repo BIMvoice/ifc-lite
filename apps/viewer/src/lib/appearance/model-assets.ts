@@ -16,6 +16,8 @@ interface ModelImages {
   incomplete: boolean;
 }
 
+// File-controlled archive paths must not inject control characters into diagnostics.
+// eslint-disable-next-line no-control-regex -- This character class intentionally removes ASCII controls.
 function displayPath(path: string): string { return path.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 160); }
 
 /** Original bytes belong to the model, independently of uploaded GPU copies. */
