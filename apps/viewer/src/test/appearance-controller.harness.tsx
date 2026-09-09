@@ -36,11 +36,23 @@ class ControlledWorker implements AppearanceWorker {
   onmessage: ((event: MessageEvent<AppearanceWorkerResponse>) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
   onmessageerror: ((event: MessageEvent) => void) | null = null;
-  message?: AppearanceWorkerRequest;
+  message?: Extract<AppearanceWorkerRequest, { type: 'plan' }>;
   lateMessage: ControlledWorker['onmessage'] = null;
   terminations = 0;
   postMessage(message: AppearanceWorkerRequest) {
-    check(message.type === 'plan', 'unexpected worker protocol');
+    if (message.type === 'catalog') {
+      // Metadata is supplied through the worker boundary, independently from
+      // the controller. Parse its actual effective IFC bytes for this fixture.
+      void new IfcParser().parseColumnar(new Uint8Array(message.source).buffer, { disableWorkerScan: true }).then(store => {
+        this.onmessage?.(new MessageEvent<AppearanceWorkerResponse>('message', { data: { type: 'catalog-complete', id: message.id, catalog: {
+          sourceRevision: message.request.sourceRevision,
+          products: message.request.productIds.map(productId => ({ productId,
+            ifcClass: store.entities.getTypeName(productId), typeIds: [] })),
+          types: [], missingProductIds: [],
+        } } }));
+      }).catch(error => this.onerror?.({ message: String(error) } as ErrorEvent));
+      return;
+    }
     this.message = structuredClone(message);
     this.lateMessage = this.onmessage;
   }
@@ -69,19 +81,26 @@ class ControlledWorker implements AppearanceWorker {
 
 /** Shared by Node/HappyDOM and an isolated real-browser lab; never run in a user's model session. */
 export async function runAppearanceControllerScenario(
-  scenario: 'strict-source' | 'discard-debounce' | 'discard-worker' | 'stale-version',
+  scenario: 'strict-source' | 'discard-debounce' | 'discard-worker' | 'stale-version' | 'upload-failure',
   imageBytes = controllerPng,
 ): Promise<{ scenario: string; requests: number; terminations: number; stages: number; nativeBitmaps: number }> {
   const initial = useViewerStore.getState();
   const oldRenderer = getGlobalRenderer();
   const workerDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
   const workers: ControlledWorker[] = [];
+  const allWorkers: ControlledWorker[] = [];
   let root: Root | undefined;
   const container = document.createElement('div');
   document.body.append(container);
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   Object.defineProperty(globalThis, 'Worker', { configurable: true, writable: true,
-    value: class extends ControlledWorker { constructor() { super(); workers.push(this); } } });
+    value: class extends ControlledWorker {
+      constructor() { super(); allWorkers.push(this); }
+      override postMessage(message: AppearanceWorkerRequest) {
+        if (message.type === 'plan') workers.push(this);
+        super.postMessage(message);
+      }
+    } });
   let stages = 0, nativeBitmaps = 0;
   try {
     const source = new TextEncoder().encode(`ISO-10303-21;
@@ -180,7 +199,19 @@ END-ISO-10303-21;`);
       check(exported.entityIndex.byType.get('IFCTRIANGULATEDFACESET')?.includes(11), 'worker source omitted canonical surface geometry');
       check(request.request.productIds.length === 1 && request.request.productIds[0] === 25, 'worker scope lost source IFC identity');
       check(request.request.imageUri === appearanceAssets.get(sourceId)?.exportName, 'worker image URI differs from retained encoded image');
-      if (scenario === 'discard-worker') {
+      if (scenario === 'upload-failure') {
+        const invalid = new window.DataTransfer();
+        invalid.items.add(new window.File([new Uint8Array([0, 1, 2])], 'broken.png', { type: 'image/png' }));
+        Object.defineProperty(picker, 'files', { configurable: true, value: invalid.files });
+        await act(async () => { picker.dispatchEvent(new window.Event('change', { bubbles: true })); });
+        await until(() => !!container.querySelector('[role=alert]')?.textContent, 'invalid image upload did not report failure');
+        const failure = container.querySelector('[role=alert]')!.textContent;
+        check(workers[0].terminations === 1, 'upload failure did not cancel the older preview job');
+        await act(async () => { workers[0].complete(true); });
+        await advance(300);
+        check(container.querySelector('[role=alert]')?.textContent === failure, 'older preview completion hid the upload failure');
+        check(stages === 0, 'older preview installed after a failed source change');
+      } else if (scenario === 'discard-worker') {
         await click('Discard');
         check(workers[0].terminations === 1, 'Discard did not terminate pending worker');
         await act(async () => { workers[0].complete(true); });
@@ -219,10 +250,11 @@ END-ISO-10303-21;`);
     check(retained.length === imageBytes.length && retained.every((byte, index) => byte === imageBytes[index]), 'panel close lost original image bytes');
     useViewerStore.getState().removeAppearanceSource(sourceId);
     check(appearanceAssets.get(sourceId) === undefined, 'removing the final source leaked a draft lease');
+    check(allWorkers.every(worker => worker.terminations === 1), 'catalog or preview worker leaked after unmount');
     return { scenario, requests: workers.length, terminations: workers.reduce((sum, worker) => sum + worker.terminations, 0), stages, nativeBitmaps };
   } finally {
     await act(async () => { root?.unmount(); });
-    for (const worker of workers) if (!worker.terminations) worker.terminate();
+    for (const worker of allWorkers) if (!worker.terminations) worker.terminate();
     container.remove();
     useViewerStore.getState().clearAllMutations();
     modelAppearanceAssets.clear(); appearanceAssets.clear();

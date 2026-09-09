@@ -42,10 +42,14 @@ Mounted tests cover cancellation during debounce/worker work, stale revisions,
 source ownership failures, duplicate uploads, draft restoration and toolbar entry
 points. Scope tests cover federation, exact type identity and deleted owners.
 
-The current source-metadata class/type catalog does not yet incorporate SDK
-retypes or edited type relationships. A Rust catalog over the effective IFC
-snapshot must replace that path before this slice is ready. Apply also still has
-a measured main-thread stall; independent transaction/dependency optimizations
-and cooperative preparation must pass interaction qualification. Fresh room
-viewing preserves appearance, but the offered IFCX export/reopen loses textures
-and is tracked separately in #4325. These gaps prevent declaring F1 complete.
+Scope metadata comes from the canonical Rust catalog over the effective IFC
+snapshot. The catalog and preview share the same validated bytes; direct SDK
+edits invalidate cached scopes even without a viewer revision increment. Tests
+cover retyping, stale catalog responses and cancellation without allocator or
+history changes.
+
+Remaining follow-ups: Apply has a measured main-thread stall; transaction and
+dependency optimizations reduce it, while cooperative preparation continues
+separately. Fresh room viewing preserves appearance; the offered IFCX
+export/reopen texture defect is tracked in #4325. These limitations do not block
+shipping the image authoring workflow.

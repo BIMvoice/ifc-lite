@@ -12,7 +12,7 @@ afterEach(() => {
   else Reflect.deleteProperty(globalThis, 'createImageBitmap');
 });
 
-for (const scenario of ['strict-source', 'discard-debounce', 'discard-worker', 'stale-version'] as const) {
+for (const scenario of ['strict-source', 'discard-debounce', 'discard-worker', 'stale-version', 'upload-failure'] as const) {
   it(`mounted AppearancePanel #4243: ${scenario}`, async () => {
     let decodes = 0, closes = 0;
     // HappyDOM has no bitmap decoder. The same harness runs with unmodified

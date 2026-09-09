@@ -2,19 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { prepareAppearanceSerialization } from '@/lib/appearance/serialization.js';
-import { StepExporter } from '@ifc-lite/export';
-import { StoreEditor } from '@ifc-lite/mutations';
+import { prepareAppearanceSnapshot, type AppearanceSnapshot } from '@/lib/appearance/snapshot.js';
 import { expandAppearanceCorners } from '@ifc-lite/renderer';
 import { useViewerStore } from '@/store';
 import { getGlobalRenderer } from '@/hooks/useBCF';
 import { appearanceAssets, modelAppearanceAssets } from '@/lib/appearance/model-assets.js';
-import { appearanceScope } from '@/lib/appearance/scope.js';
+import { appearanceOwners, appearanceScope } from '@/lib/appearance/scope.js';
 import { appearanceMapping, DEFAULT_APPEARANCE_SETTINGS } from '@/lib/appearance/settings.js';
 import { createAppearancePlanner } from '@/lib/appearance/planner-worker-client.js';
 import { AppearancePreviewSession, bindAppearancePreview, type AppearancePreviewParts } from '@/lib/appearance/preview.js';
 import { appearanceRevision, captureAppearanceSource, commitAppearance } from '@/lib/appearance/command.js';
-import type { AppearancePlan } from '@/lib/appearance/planner-types.js';
+import type { AppearanceCatalog, AppearancePlan } from '@/lib/appearance/planner-types.js';
 import type { AppearanceAssetOwner } from '@/lib/appearance/assets.js';
 import type { AppearancePanelViewProps, AppearanceScope, AppearanceDraftSettings } from './types.js';
 
@@ -63,10 +61,13 @@ export function useAppearancePanel(): AppearancePanelViewProps {
   const draft = useRef<Draft | null>(null);
   const planner = useRef<ReturnType<typeof createAppearancePlanner> | null>(null);
   const supported = useRef<number[]>([]);
+  const snapshot = useRef<AppearanceSnapshot | null>(null);
+  const [catalogState, setCatalogState] = useState<{ modelId: string; catalog: AppearanceCatalog } | null>(null);
   const mounted = useRef(true);
   const target = models.get(modelId ?? '');
-  const scopeResult = useMemo(() => appearanceScope(useViewerStore.getState(), modelId ?? '', scope),
-    [models, modelId, scope, selection, primarySelection, mutationVersion]);
+  const owners = useMemo(() => appearanceOwners(useViewerStore.getState(), modelId ?? ''),
+    [models, modelId, selection, primarySelection, mutationVersion]);
+  const scopeResult = appearanceScope(catalogState?.modelId === modelId ? catalogState.catalog : null, owners.selectedProductIds, scope);
   const unavailableReason = roomId ? 'Leave the shared room to edit appearance, then share the finished model.'
     : !target?.ifcDataStore ? 'Open an IFC model to apply appearance.'
     : target.schemaVersion === 'IFC2X3' || target.schemaVersion === 'IFC5' ? 'Appearance authoring currently needs an IFC4 or IFC4X3 model.'
@@ -83,6 +84,7 @@ export function useAppearancePanel(): AppearancePanelViewProps {
     return () => {
       mounted.current = false;
       ownedPlanner.dispose();
+      snapshot.current = null;
       if (planner.current === ownedPlanner) planner.current = null;
       const previous = draft.current; draft.current = null;
       discardDraft(previous);
@@ -90,17 +92,17 @@ export function useAppearancePanel(): AppearancePanelViewProps {
   }, []);
 
   useEffect(() => {
-    if (!previewEnabled || !sourceId || !modelId || unavailableReason) {
+    if (!modelId || unavailableReason) {
       const previous = draft.current; draft.current = null;
       discardDraft(previous);
+      snapshot.current = null; setCatalogState(null);
       setStatus('idle');
-      if (!sourceId || !modelId || unavailableReason) {
-        setCounts({ affected: 0, excluded: 0, reasons: [] });
-        setStatusMessage(undefined);
-      } else if (appliedRevision.current && appliedRevision.current !== appearanceRevision(modelId)) {
-        setStatusMessage('Model updated. Adjust the mapping to preview another appearance.');
-      }
+      setCounts({ affected: 0, excluded: 0, reasons: [] });
+      setStatusMessage(undefined);
       return;
+    }
+    if (!previewEnabled || !sourceId) {
+      const previous = draft.current; draft.current = null; discardDraft(previous);
     }
     const controller = new AbortController();
     pendingAbort.current = controller;
@@ -110,36 +112,41 @@ export function useAppearancePanel(): AppearancePanelViewProps {
     }
     const owner: AppearanceAssetOwner = { kind: 'draft', id: crypto.randomUUID() };
     let adopted = false;
-    setStatus('preparing'); setStatusMessage('Preparing appearance preview…');
+    supported.current = [];
+    setCounts({ affected: 0, excluded: 0, reasons: [] });
+    setStatus('preparing'); setStatusMessage(previewEnabled && sourceId ? 'Preparing appearance preview…' : 'Preparing model scope…');
     const timer = setTimeout(() => { void (async () => {
       try {
-        const state = useViewerStore.getState();
-        const model = state.models.get(modelId);
-        const view = state.mutationViews.get(modelId);
-        const renderer = getGlobalRenderer();
         const worker = planner.current;
-        if (!worker || !renderer || !model?.ifcDataStore || !view) throw new Error('The model is not ready to preview appearance.');
-        if (!scopeResult.productIds.length) throw new Error('Choose a scope containing model surfaces.');
-        // StoreEditor initializes the shared allocator above the original source IDs.
-        new StoreEditor(model.ifcDataStore, view);
-        const nextExpressId = view.peekNextExpressId();
-        const source = captureAppearanceSource(view);
-        const schema = model.schemaVersion.startsWith('IFC4X3') ? 'IFC4X3' : 'IFC4';
+        if (!worker) throw new Error('The appearance worker is unavailable.');
+        const currentSnapshot = await prepareAppearanceSnapshot(snapshot.current, modelId, owners.productIds, worker, controller.signal);
+        if (controller.signal.aborted || !mounted.current) return;
+        snapshot.current = currentSnapshot;
+        setCatalogState({ modelId, catalog: currentSnapshot.catalog });
+        if (!previewEnabled || !sourceId) {
+          setCounts({ affected: 0, excluded: 0, reasons: [] });
+          setStatus('idle');
+          setStatusMessage(!sourceId ? undefined : appliedRevision.current
+            ? appliedRevision.current === currentSnapshot.revision ? 'Appearance applied. Undo is available.'
+              : 'Model updated. Adjust the mapping to preview again.'
+            : 'Preview discarded. Adjust the mapping to preview again.');
+          return;
+        }
+        const currentScope = appearanceScope(currentSnapshot.catalog, owners.selectedProductIds, scope);
+        if (!currentScope.productIds.length) throw new Error('Choose a scope containing model surfaces.');
+        const renderer = getGlobalRenderer();
+        if (!renderer) throw new Error('The renderer is not ready to preview appearance.');
+        const { source, schema, nextExpressId, bytes } = currentSnapshot;
         const imageUri = modelAppearanceAssets.getAuthoredUri(modelId, sourceId);
         appearanceAssets.retain(sourceId, owner);
         const bitmap = await appearanceAssets.decode(sourceId, owner, controller.signal);
-        const serialized = prepareAppearanceSerialization(modelId, model.ifcDataStore, view);
-        const exported = await new StepExporter(model.ifcDataStore, serialized.view).exportAsync({
-          schema, applyMutations: true, includeGeometry: true, visibleOnly: false,
-        });
-        if (controller.signal.aborted || appearanceRevision(modelId) !== revision) return;
-        source.validate(useViewerStore.getState().mutationViews.get(modelId));
-        const bytes = typeof exported.content === 'string' ? new TextEncoder().encode(exported.content) : exported.content;
-        const plan = await worker.plan(bytes, { schema, sourceRevision: revision, nextExpressId,
-          productIds: scopeResult.productIds, imageUri, repeatS: settings.repeatS,
+        currentSnapshot.validate();
+        const plan = await worker.plan(bytes, { schema, sourceRevision: currentSnapshot.revision, nextExpressId,
+          productIds: currentScope.productIds, imageUri, repeatS: settings.repeatS,
           repeatT: settings.repeatT, mapping: appearanceMapping(settings) }, { signal: controller.signal });
-        if (controller.signal.aborted || appearanceRevision(modelId) !== revision) return;
-        source.validate(useViewerStore.getState().mutationViews.get(modelId));
+        if (controller.signal.aborted || !mounted.current) return;
+        currentSnapshot.validate();
+        const state = useViewerStore.getState();
         if (!plan.items.length) throw new Error(plan.exclusions[0]?.reason ?? 'No surfaces in this scope support the chosen mapping.');
         // Exclusions must be acknowledged explicitly before the narrower scope applies.
         supported.current = [...new Set(plan.items.map(item => item.productId))];
@@ -163,7 +170,7 @@ export function useAppearancePanel(): AppearancePanelViewProps {
       } finally { if (!adopted) appearanceAssets.releaseOwner(owner); }
     })(); }, 250);
     return () => { clearTimeout(timer); controller.abort(); if (!adopted) appearanceAssets.releaseOwner(owner); };
-  }, [modelId, sourceId, settings, scopeResult, unavailableReason, mutationVersion, previewEnabled]);
+  }, [modelId, sourceId, settings, owners, scope, unavailableReason, mutationVersion, previewEnabled]);
 
   async function upload(file: File): Promise<void> {
     const uploadOwner: AppearanceAssetOwner = { kind: 'draft', id: crypto.randomUUID() };
@@ -183,7 +190,12 @@ export function useAppearancePanel(): AppearancePanelViewProps {
       }
       if (mounted.current) { setSourceId(asset.id); setPreviewEnabled(true); }
     } catch (error) {
-      if (mounted.current) { setStatus('error'); setStatusMessage(message(error)); }
+      if (mounted.current) {
+        // An older scope/preview job must not overwrite the upload failure with
+        // its later success message. Keep the previous committed appearance.
+        pendingAbort.current?.abort(); planner.current?.cancel();
+        setStatus('error'); setStatusMessage(message(error));
+      }
     } finally {
       // A subscriber may throw after publication; the catalog still owns that
       // image. Only provisional resources that were never adopted are released.

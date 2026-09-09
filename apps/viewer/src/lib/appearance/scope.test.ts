@@ -8,7 +8,8 @@ import { MutablePropertyView } from '@ifc-lite/mutations';
 import { useViewerStore } from '@/store';
 import type { FederatedModel } from '@/store';
 import type { MeshData } from '@ifc-lite/geometry';
-import { appearanceScope } from './scope.js';
+import { appearanceOwners, appearanceScope } from './scope.js';
+import type { AppearanceCatalog } from './planner-types.js';
 import { appearanceMapping, DEFAULT_APPEARANCE_SETTINGS } from './settings.js';
 
 async function model(id: string, idOffset: number): Promise<FederatedModel> {
@@ -39,16 +40,26 @@ END-ISO-10303-21;`);
       coordinateInfo: { originShift: { x: 0, y: 0, z: 0 }, originalBounds: bounds, shiftedBounds: bounds, hasLargeCoordinates: false } } };
 }
 
+// Native/actual-WASM tests establish effective IFC metadata. These values
+// exercise only the UI's identity-based choice over that catalog contract.
+const catalog: AppearanceCatalog = {
+  sourceRevision: 'scope-fixture', missingProductIds: [],
+  products: [{ productId: 10, ifcClass: 'IfcWall', typeIds: [20] },
+    { productId: 11, ifcClass: 'IfcWall', typeIds: [21] }, { productId: 12, ifcClass: 'IfcSlab', typeIds: [] }],
+  types: [{ typeId: 20, ifcClass: 'IfcWallType', Name: 'Same name' },
+    { typeId: 21, ifcClass: 'IfcWallType', Name: 'Same name' }],
+};
+
 describe('appearance scope and physical mapping #4243', () => {
   it('isolates federation selection and distinguishes types with identical names', async () => {
     const a = await model('a', 0), b = await model('b', 1_000_000);
     useViewerStore.setState({ models: new Map([['a', a], ['b', b]]), mutationViews: new Map(),
       selectedEntityIds: new Set([10, 1_000_011]), selectedEntityId: 1_000_011 });
     const state = useViewerStore.getState();
-    assert.deepEqual(appearanceScope(state, 'a', { kind: 'selection' }).productIds, [10]);
-    assert.deepEqual(appearanceScope(state, 'b', { kind: 'selection' }).productIds, [11]);
-    assert.deepEqual(appearanceScope(state, 'b', { kind: 'class', ifcClass: 'IfcWall' }).productIds, [10, 11]);
-    const scope = appearanceScope(state, 'a', { kind: 'type', typeId: 21 });
+    assert.deepEqual(appearanceScope(catalog, appearanceOwners(state, 'a').selectedProductIds, { kind: 'selection' }).productIds, [10]);
+    assert.deepEqual(appearanceScope(catalog, appearanceOwners(state, 'b').selectedProductIds, { kind: 'selection' }).productIds, [11]);
+    assert.deepEqual(appearanceScope(catalog, [], { kind: 'class', ifcClass: 'IfcWall' }).productIds, [10, 11]);
+    const scope = appearanceScope(catalog, [], { kind: 'type', typeId: 21 });
     assert.deepEqual(scope.productIds, [11]);
     assert.deepEqual(scope.types.map(type => type.id), [20, 21]);
   });
@@ -58,8 +69,8 @@ describe('appearance scope and physical mapping #4243', () => {
     view.deleteEntity(11);
     useViewerStore.setState({ models: new Map([['a', a]]), mutationViews: new Map([['a', view]]),
       selectedEntityIds: new Set([10, 11]), selectedEntityId: 10 });
-    assert.deepEqual(appearanceScope(useViewerStore.getState(), 'a', { kind: 'model' }).productIds, [10, 12]);
-    assert.deepEqual(appearanceScope(useViewerStore.getState(), 'a', { kind: 'selection' }).productIds, [10]);
+    assert.deepEqual(appearanceOwners(useViewerStore.getState(), 'a').productIds, [10, 12]);
+    assert.deepEqual(appearanceOwners(useViewerStore.getState(), 'a').selectedProductIds, [10]);
   });
   it('keeps a rotated projection frame orthonormal and preserves physical tile dimensions', () => {
     for (const plane of ['xy', 'xz', 'yz'] as const) {
