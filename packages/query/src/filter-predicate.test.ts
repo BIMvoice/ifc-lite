@@ -93,8 +93,79 @@ describe('compareFilterValue', () => {
       expect(compareFilterValue('.T.', 'matches', '^\\.T\\.$')).toBe(true);
     });
 
-    it('an invalid pattern does not throw -- it matches nothing', () => {
-      expect(compareFilterValue('anything', 'matches', '[unterminated')).toBe(false);
+    // Was: "an invalid pattern does not throw -- it matches nothing" (returned
+    // `false`). A review flagged that as inconsistent with this repo's
+    // fail-loud precedent for caller-supplied input (`--limit`/`--offset`
+    // validate up front with `fatal()` rather than silently clamping) --
+    // fixed alongside the ReDoS guard below, since both are "a `matches`
+    // pattern this module refuses to run" and should fail the same way.
+    it('an invalid pattern throws, naming why, rather than silently matching nothing', () => {
+      expect(() => compareFilterValue('anything', 'matches', '[unterminated')).toThrow(
+        /invalid regular expression/i,
+      );
+    });
+
+    // Measured: `new RegExp('^(a+)+$').test(subject)` on a non-matching
+    // subject is exponential in subject length in V8's backtracking engine
+    // (n=26 -> ~290ms, n=28 -> ~1.1s, n=30 -> multiple seconds, n=35 -> >30s,
+    // killed). `compareFilterValue` must reject this shape before ever
+    // calling `.test()`, not attempt the match and hope it finishes --
+    // asserting only on elapsed time here, deliberately, so this test cannot
+    // pass by accident if the rejection itself stops working but the pattern
+    // happens to run fast on this particular subject.
+    it('rejects a catastrophic nested-quantifier pattern before compiling, fast', () => {
+      const start = performance.now();
+      expect(() => compareFilterValue('a'.repeat(26) + '!', 'matches', '^(a+)+$')).toThrow(
+        /nested quantifier|exponential/i,
+      );
+      const elapsed = performance.now() - start;
+      // The unguarded pattern measured ~290ms at this exact length (n=26) --
+      // a guarded rejection should be orders of magnitude faster than that,
+      // not merely under some generous ceiling.
+      expect(elapsed).toBeLessThan(50);
+    });
+
+    it('rejects an over-long pattern before compiling', () => {
+      const longPattern = '^' + 'a'.repeat(300) + '$';
+      expect(() => compareFilterValue('anything', 'matches', longPattern)).toThrow(
+        /exceeds the .*-character limit/i,
+      );
+    });
+
+    it('still matches ordinary patterns unaffected by the new guard', () => {
+      expect(compareFilterValue('REI60', 'matches', '^REI')).toBe(true);
+      expect(compareFilterValue('SomeWall', 'matches', 'Wall.*')).toBe(true);
+      expect(compareFilterValue('123', 'matches', '[0-9]+')).toBe(true);
+      expect(compareFilterValue('abc', 'matches', '[0-9]+')).toBe(false);
+    });
+
+    // Compiling a `matches` pattern once and reusing it for every candidate
+    // in a query (instead of `new RegExp(...)` per entity, the shape
+    // `applyWhereFilter`/`matchesPropertyFilter` all called this in before)
+    // must produce identical results to a fresh per-call compile -- the
+    // cache is purely an optimization, and must not let one pattern's
+    // compiled RegExp leak into another pattern's result, or make a
+    // pattern's Nth evaluation disagree with its 1st.
+    it('per-query (cached) compilation matches per-entity (uncached) compilation, across interleaved patterns', () => {
+      const subjects = ['WT01-Wall', 'WT02-Wall', 'REI60', 'REI90', 'SomeWall', '12345'];
+      const patterns = ['^WT01', '^REI', 'Wall$', '^[0-9]+$'];
+
+      // Baseline: a fresh RegExp per call, exactly what the pre-fix code did
+      // per candidate entity.
+      const expected = subjects.map((s) => patterns.map((p) => new RegExp(p).test(s)));
+
+      // Interleave patterns (as a real multi-filter query would across many
+      // entities) to exercise the cache's key lookup, not just repeated use
+      // of a single pattern.
+      const actual = subjects.map((s) => patterns.map((p) => compareFilterValue(s, 'matches', p)));
+
+      expect(actual).toEqual(expected);
+
+      // Re-run the same patterns again (simulating a second query, or more
+      // entities) -- cached compilation must still agree with fresh
+      // compilation, not just on the first pass.
+      const secondPass = subjects.map((s) => patterns.map((p) => compareFilterValue(s, 'matches', p)));
+      expect(secondPass).toEqual(expected);
     });
   });
 });

@@ -41,22 +41,196 @@ export function normalizeBooleanValue(value: unknown): unknown {
  * `contains`, which lowercases both sides) — the pattern's author controls
  * case sensitivity, not this function.
  *
- * An invalid pattern does not throw — `compareFilterValue` is a boolean
- * predicate on every other branch (`>` against a non-numeric `expected` is
- * `Number(x) > NaN` which is already `false`, never a throw), so a malformed
- * regex is treated the same way: it cannot match anything, so the predicate
- * is `false`. A caller that wants to surface "this pattern is invalid" as a
- * loud error (e.g. a selector adapter validating user input before running a
- * query) must do that at parse time, before values ever reach here.
+ * `expected` is caller-supplied — the CLI `--where ~=` flag and, more
+ * pointedly, the MCP `query_entities` tool's `property.value`, which is
+ * agent/LLM-influenced input running synchronously on the MCP server's one
+ * main thread. `new RegExp(source).test(actual)` is not a safe operation on
+ * untrusted `source`: a pattern shaped like `^(a+)+$` against a
+ * non-matching subject is exponential in subject length in V8's backtracking
+ * engine (measured: a 35-character non-matching subject already exceeds
+ * 30s; see `filter-predicate.test.ts`'s catastrophic-pattern test for the
+ * reproduction). `compileFilterPattern` below rejects patterns matching that
+ * shape, and any other invalid pattern, *before* compiling — loudly, by
+ * throwing, not by returning `false`. That intentionally changes this
+ * function's contract from "never throws" (the shape every other
+ * `compareFilterValue` branch keeps: `>` against a non-numeric `expected` is
+ * `Number(x) > NaN`, already `false`, never a throw) to "throws on a
+ * rejected or malformed pattern" — the two are different failure classes.
+ * Silently returning `false` for an operator-coercion mismatch (a caller
+ * error at the value level) is fine; silently returning `false` for a
+ * pattern this repo refuses to run is not, per this repo's existing
+ * fail-loud precedent for caller-supplied input (`--limit`/`--offset`
+ * validate up front with `fatal()` rather than silently clamping). A caller
+ * that wants to reject a pattern even earlier (e.g. a selector adapter
+ * validating user input before a query starts) still can — that guidance
+ * from the previous version of this comment still holds — but it is no
+ * longer required for safety, because this layer now refuses unsafe input
+ * itself.
+ *
+ * This is a heuristic input constraint, not a proof of linear-time
+ * execution — see `compileFilterPattern`'s own doc comment for what it does
+ * and does not catch, and the PR description for the alternatives (a
+ * wall-clock timeout, a linear-time engine) this environment ruled out.
  */
 function matchesRegex(actual: unknown, expected: unknown): boolean {
+  const re = compileFilterPattern(String(expected));
+  return re.test(String(actual));
+}
+
+/** Upper bound on a `matches` pattern's source length. Chosen to comfortably
+ * cover realistic IFC identifier/name/type patterns (`^IfcWall`,
+ * `Pset_.*Common`, GlobalId-shaped alternations) while still being short
+ * enough that {@link hasNestedQuantifier}'s O(n^2) scan and any surviving
+ * backtracking risk stay cheap. NOTE: this cap alone does not neutralize
+ * catastrophic backtracking — the measured repro's worst timing (>30s,
+ * killed) came from a 35-character pattern/subject, far under any length
+ * cap generous enough to be usable. Length is a blunt secondary control;
+ * {@link hasNestedQuantifier} is the control actually aimed at the measured
+ * failure shape. */
+const MAX_FILTER_PATTERN_LENGTH = 200;
+
+/** Thrown by {@link compileFilterPattern} for a pattern this module refuses
+ * to compile, whether because it is not valid regex syntax or because it
+ * matches a known catastrophic-backtracking shape. Named so a caller that
+ * wants to distinguish "your pattern was rejected" from other errors can
+ * `instanceof` it; every current caller lets it propagate as a loud failure
+ * (the CLI's top-level `main().catch` prints `Error [<command>]: <message>`
+ * and exits 1; the MCP server's generic tool-call catch turns it into an
+ * `isError: true` result; the viewer SDK adapter's `entities()` already
+ * throws `TypeError` for other invalid input in this same method, so this
+ * joins that precedent rather than inventing a new one). */
+export class InvalidFilterPatternError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidFilterPatternError';
+  }
+}
+
+/**
+ * Detect the specific catastrophic-backtracking shape this module measured
+ * and is defending against: a quantified group (`(...)+`, `(...)*`,
+ * `(...){m,n}`) whose own contents contain another quantifier at the same
+ * nesting depth, e.g. `(a+)+`, `(a*)*`, `(a+){2,}`. Ambiguous nested
+ * repetition is the textbook cause of exponential backtracking in a
+ * backtracking (non-linear-time) engine like V8's — each extra repeat of
+ * the outer quantifier multiplies the number of ways the inner one can
+ * partition the same input, and on a non-matching subject the engine tries
+ * all of them before giving up.
+ *
+ * This is a heuristic, not a backtracking-complexity analyzer: it will
+ * reject some patterns that would in fact run fine (a false positive — the
+ * user hits a "pattern rejected" error for a pattern that was actually
+ * safe), and it will not catch every ReDoS-capable shape (e.g. overlapping
+ * alternation like `(a|a)*`, or nesting split across more than two levels
+ * in a way that doesn't land two quantifiers at the same depth). Given this
+ * environment cannot add a linear-time regex engine (no dependency install
+ * available) or move `.test()` off the main thread onto a wall-clock
+ * timeout (a much larger, async-ifying change — see the PR description),
+ * this heuristic plus the length cap is the practical, dependency-free
+ * mitigation available; residual risk from a shape it misses is real and is
+ * stated as such rather than implied away.
+ *
+ * Implemented as a manual bounded scan (paren-depth tracking with
+ * backslash-escape awareness), not a regex against the pattern string —
+ * checking an untrusted regex source for danger with another regex would
+ * risk reintroducing the exact class of bug this function exists to catch.
+ * Bounded by `MAX_FILTER_PATTERN_LENGTH` before this ever runs, so its
+ * worst case (O(n^2) from rescanning nested groups) is cheap regardless.
+ */
+function hasNestedQuantifier(pattern: string): boolean {
+  const isEscaped = (s: string, idx: number): boolean => {
+    let count = 0;
+    let i = idx - 1;
+    while (i >= 0 && s[i] === '\\') {
+      count++;
+      i--;
+    }
+    return count % 2 === 1;
+  };
+
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern[i] !== '(' || isEscaped(pattern, i)) continue;
+
+    let depth = 1;
+    let innerQuantified = false;
+    let j = i + 1;
+    for (; j < pattern.length && depth > 0; j++) {
+      const c = pattern[j];
+      if (c === '\\') {
+        j++; // skip the escaped character, whatever it is
+        continue;
+      }
+      if (c === '(' && !isEscaped(pattern, j)) {
+        depth++;
+        continue;
+      }
+      if (c === ')' && !isEscaped(pattern, j)) {
+        depth--;
+        continue;
+      }
+      if (depth === 1 && (c === '+' || c === '*' || c === '{')) innerQuantified = true;
+    }
+    if (depth !== 0) continue; // unbalanced -- let `new RegExp` report the syntax error
+
+    const closeIdx = j - 1; // index of this group's matching ')'
+    const after = pattern[closeIdx + 1];
+    if (innerQuantified && (after === '+' || after === '*' || after === '{')) return true;
+  }
+  return false;
+}
+
+/** Bounded so a pattern this module has already validated once (the common
+ * case: the same `matches` pattern is compiled once, then tested against
+ * every candidate entity in a `where`/`--where` query — see
+ * `applyWhereFilter`, `matchesPropertyFilter` in both the CLI and MCP
+ * packages, and the viewer SDK adapter, none of which vary the pattern
+ * per-entity) is compiled exactly once, not once per entity, without
+ * requiring every call site to remember to hoist the compile out of its
+ * loop itself. Cleared wholesale rather than evicted LRU-style once it
+ * would grow past a bound — simpler, and a cache clear just means the next
+ * lookup re-validates and re-compiles, which is correct, only slower. */
+const FILTER_PATTERN_CACHE_LIMIT = 500;
+const filterPatternCache = new Map<string, RegExp>();
+
+/**
+ * Validate and compile a `matches` pattern, or throw
+ * {@link InvalidFilterPatternError} naming why. See {@link hasNestedQuantifier}
+ * and {@link MAX_FILTER_PATTERN_LENGTH} for what is rejected and why;
+ * neither rejection depends on ever running the pattern against a subject,
+ * so a rejected pattern fails in roughly constant time regardless of how
+ * long its would-be matching would have taken.
+ */
+function compileFilterPattern(pattern: string): RegExp {
+  const cached = filterPatternCache.get(pattern);
+  if (cached) return cached;
+
+  if (pattern.length > MAX_FILTER_PATTERN_LENGTH) {
+    throw new InvalidFilterPatternError(
+      `matches: pattern rejected -- ${pattern.length} characters exceeds the ` +
+        `${MAX_FILTER_PATTERN_LENGTH}-character limit for a "matches" pattern.`,
+    );
+  }
+  if (hasNestedQuantifier(pattern)) {
+    throw new InvalidFilterPatternError(
+      `matches: pattern rejected -- it contains a quantified group with another ` +
+        `quantifier inside it (e.g. "(a+)+"), a shape that can take exponential ` +
+        `time to fail to match on adversarial input. Rewrite the pattern without ` +
+        `nesting a quantifier inside a quantified group.`,
+    );
+  }
+
   let re: RegExp;
   try {
-    re = new RegExp(String(expected));
-  } catch {
-    return false;
+    re = new RegExp(pattern);
+  } catch (err) {
+    throw new InvalidFilterPatternError(
+      `matches: invalid regular expression ${JSON.stringify(pattern)}: ${(err as Error).message}`,
+    );
   }
-  return re.test(String(actual));
+
+  if (filterPatternCache.size >= FILTER_PATTERN_CACHE_LIMIT) filterPatternCache.clear();
+  filterPatternCache.set(pattern, re);
+  return re;
 }
 
 /**
