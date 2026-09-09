@@ -418,13 +418,6 @@ function jsonTypeOf(value: unknown): string {
   return typeof value;
 }
 
-/**
- * Cheap shape check for catastrophic-backtracking patterns. Catches
- * the textbook `(a+)+`, `(a*)*`, `(.+)+`, `(.+)*` shapes — a quantifier
- * directly wrapping a quantifier inside a group. Not exhaustive (a
- * determined adversary can still craft ReDoS), but rejects the
- * obvious ones at no runtime cost.
- */
 function formatValue(value: unknown): string {
   if (value === undefined) return 'undefined';
   try {
