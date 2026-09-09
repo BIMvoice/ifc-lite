@@ -481,6 +481,10 @@ into the final deduplication key. The native processing pipeline manages this li
 
 Other notable re-exports: `orient_mesh_outward`, `calculate_normals`, `ClippingProcessor`, `Plane`, `Triangle` (CSG), `hash_mesh_world` / `GeometryHasher` (geometry-diff hashing), instancing encode/decode helpers, and the nalgebra types `Point2`, `Point3`, `Vector2`, `Vector3`.
 
+`embedded_raster_dimensions(step_binary)` returns optional PNG/JPEG dimensions
+from an IFC binary literal without decoding pixels. It supports allocation
+preflight; a readable header does not certify a complete or valid image stream.
+
 ---
 
 ## ifc-lite-processing
@@ -509,6 +513,53 @@ pub use types::mesh::{InstanceRecord, MeshData, RawInstanceOccurrence};
 pub use types::response::{CoordinateInfo, ModelMetadata, ParseResponse, ProcessingStats};
 pub use parallel_scan::build_entity_index_parallel;
 ```
+
+### Appearance authoring
+
+`ifc_lite_processing::appearance::calibrate_appearance_plane` establishes one
+measured plane from two stable native-source landmarks and a known distance.
+`PlaneCalibrationRequest` supplies the raster-to-source affine, raster extent
+and an IFC Z-up world anchor/direction/normal. `CalibratedPlane` returns a
+world-space `Mapping::Planar`, raster corners and metres per source unit.
+Crop, page rotation and raster DPI only change the raster-to-source transform;
+they do not change the retained calibration landmarks or measured distance.
+This bounded calculation does not mutate IFC or composite pixels outside the
+page. Invalid, sheared or unrepresentable planes fail explicitly. Reconstructed
+world edges and anchor displacement must each preserve their intended vector
+within one part per million; large origins never enlarge that tolerance.
+
+`ifc_lite_processing::appearance::plan_appearance` prepares image and UV edits
+against an effective IFC STEP snapshot. It shares canonical geometry production
+with loading and returns both IFC edit operations and per-corner preview data.
+It does not mutate the input. `AppearanceRequest` supplies an IFC4/IFC4X3 schema,
+revision token, reserved allocator watermark, product IDs, relative image URI
+and an existing-UV, planar or box mapping. The initial scope is direct, unshared
+`IfcTriangulatedFaceSet` Body geometry with absent or complete `IfcLocalPlacement`
+chains. `IfcGridPlacement` and `IfcLinearPlacement`, including local placements
+parented to them, remain explicitly unsupported in every mapping mode; canonical
+load-time placement recovery is not sufficient validation for writing edits.
+Products with sliceable material-layer associations are also excluded, because
+reopening may replace their face set with layer slices. Canonical comparisons
+resolve the shared load-time RTC metadata before meshing georeferenced geometry.
+Plans report unsupported products;
+callers must explicitly accept a reduced scope, retain image resources and
+apply the complete IFC edit plan atomically after revalidating the revision and
+allocator. Preview consumers validate source topology and map triangle corners,
+rather than assuming vertex counts establish UV correspondence. `targetVertexCount`
+is the final canonical vertex-pool bound; removed triangles may leave unused
+vertices before or after the surviving indices. Do not substitute corner count
+or maximum-index-plus-one for this pool size.
+`targetCornerNormals` carries final shading normals in renderer Y-up triangle-corner
+order (`[nx, nz, -ny]` from IFC). Removing UV seams can merge near-coplanar weld
+representatives and change shading normals while every triangle position remains
+identical. Preview installs these canonical target normals so its shading matches
+reopening; it must not retain the previous normals or relax position checks.
+
+The exported `ifc_lite_geometry::MAX_TEXTURE_DIMENSION` is the shared raster edge
+limit; appearance preflight rejects invalid pixel dimensions. Embedded PNG/JPEG
+header inspection reads at most 1 MiB of encoded header bytes without copying the
+full STEP binary literal or decoding pixels.
+
 
 ---
 
@@ -745,3 +796,14 @@ This will generate detailed documentation including:
 - Source code links
 - Examples from doc comments
 - Cross-references between items
+
+
+`ifc_lite_processing::appearance::catalog_appearance(bytes, &AppearanceCatalogRequest)`
+resolves rendered owner class and type selectors from an already-effective IFC4
+or IFC4X3 snapshot. It returns sorted `AppearanceCatalog` products/types and an
+explicit missing/ineligible ID list. IFC class strings use canonical PascalCase;
+`AppearanceCatalogType.name` serializes as the exact EXPRESS attribute `Name`.
+The function reuses appearance source decoding and its budgets, performs no meshing
+or texture-image decoding, and rejects malformed relevant type assignments or oversized
+catalog metadata without partial results. Hosts retain federation and selection
+orchestration and must fence stale snapshot responses before use.

@@ -10,6 +10,7 @@
  */
 
 import { Extension, SpaceSketch, AddElement, EditElement, EditProperty, ImportData, Undo, Redo } from '@/icons';
+import { Palette } from 'lucide-react';
 import { useViewerStore } from '@/store';
 import { useIfc } from '@/hooks/useIfc';
 import { tourAnchor, toolAnchor } from '@/lib/tours/anchors';
@@ -89,6 +90,15 @@ export function AuthorTab() {
       <RibbonGroupDivider />
 
       <RibbonGroup label="Create">
+        <RibbonLargeButton
+          icon={Palette}
+          label="Appearance"
+          className="w-20"
+          tooltip="Appearance: apply images across IFC surfaces"
+          active={activeWorkspacePanels.has('appearance')}
+          activeClassName={EDIT_ACTIVE_CLASS}
+          onClick={() => handleToggleRightPanel('appearance')}
+        />
         <RibbonLargeButton
           icon={AddElement}
           label="Add element"

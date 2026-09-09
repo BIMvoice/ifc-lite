@@ -18,6 +18,8 @@ interface RawIfcxMesh {
   color?: [number, number, number, number] | [number, number, number];
   ifcType?: string;
   ifc_type?: string;
+  uvs?: Float32Array;
+  texture?: MeshData['texture'];
 }
 
 export interface ViewerModelPayload {
@@ -49,6 +51,8 @@ export function convertIfcxMeshes(rawMeshes: RawIfcxMesh[]): MeshData[] {
       positions,
       indices,
       normals,
+      uvs: mesh.uvs,
+      texture: mesh.texture,
       color: normalizeColor(mesh.color),
       ifcType: mesh.ifcType ?? mesh.ifc_type ?? 'IfcProduct',
     };
