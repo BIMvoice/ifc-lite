@@ -6504,6 +6504,10 @@
   ],
   "@ifc-lite/renderer": [
     "AdapterInfoSnapshot: interface",
+    "AppearanceChange: interface",
+    "AppearanceOwner: interface",
+    "AppearancePreview: interface",
+    "AppearanceToken: interface",
     "BVH: class",
     "BatchedMesh: interface",
     "Bounds3: interface",

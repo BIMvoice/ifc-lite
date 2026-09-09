@@ -7,6 +7,7 @@
  */
 
 import { createSceneBatch } from './scene-batch-upload.js';
+import { createSceneAppearancePreview } from './scene-appearance-preview.js';
 import { interleaveTexturedVertices } from './textured-vertices.js';
 import { RgbaTexturePool } from './rgba-texture-pool.js';
 import { splitMeshForStreaming } from './scene-stream-split.js';
@@ -236,6 +237,29 @@ export class Scene {
    *  Refcounted: entries die when the last referencing mesh is removed / on clear(). */
   private sharedTextures = new Map<number, { texture: GPUTexture; refs: number }>();
   private rgbaTexturePool = new RgbaTexturePool();
+  private appearanceController?: ReturnType<typeof createSceneAppearancePreview>;
+
+  appearancePreview(device: GPUDevice, pipeline: RenderPipeline) {
+    return this.appearanceController ??= createSceneAppearancePreview({
+      meshes: () => this.texturedMeshes, data: this.meshDataMap,
+      hasInstances: id => this.instancedEntityMap.has(id),
+      ready: () => !this.geometryReleased && !this.pendingBatchKeys.size && !this.streamingFragments.length,
+      buckets: {
+        buckets: this.buckets, reverse: () => this.meshDataBucket,
+        create: (parts, key) => this.createBatchedMesh(parts, parts[0].color, device, pipeline, key),
+        release: batch => { this.dropPartialCacheForBatch(batch); this.lastDrawnFrame.delete(batch.id); destroyGpuResources(batch); },
+        changed: key => this.markBucketDirty(key),
+        refresh: () => { this.batchedMeshes = [...this.buckets.values()].flatMap(b => b.batchedMesh ? [b.batchedMesh] : []); },
+      },
+      upload: part => this.createTexturedMesh(part, device, pipeline),
+      release: mesh => {
+        mesh.vertexBuffer.destroy(); mesh.indexBuffer.destroy(); mesh.uniformBuffer.destroy();
+        this.releaseTexturedMeshTexture(mesh);
+      },
+      invalidate: id => { this.boundingBoxes.delete(id); this.evictHighlightMeshes(id); },
+    });
+  }
+
   private texturedDevice?: GPUDevice;                               // #961: cached for textured-mesh re-upload on translate
   /** GPU-instancing: unique templates + per-occurrence buffers (fed by
    *  addInstancedShard). SLOT-STABLE and therefore SPARSE: a per-model removal
@@ -790,6 +814,7 @@ export class Scene {
       const lastDrawn = this.lastDrawnFrame.get(b.id) ?? -1;
       if (lastDrawn === this.residencyFrame) continue;      // drawn this frame: not evictable
       if (bucket.meshData.length === 0) continue;           // no rebuild source: keep resident
+      if (bucket.meshData.some(part => this.appearanceController?.owns(part.expressId))) continue;
       shells.push({ key: bucket.key, bytes, lastDrawnFrame: lastDrawn });
     }
     if (residentBytes <= budget) return;
@@ -1117,6 +1142,7 @@ export class Scene {
    * when streaming completes to do one O(N) full merge.
    */
   appendToBatches(meshDataArray: MeshData[], device: GPUDevice, pipeline: RenderPipeline, isStreaming: boolean = false): void {
+    if (this.appearanceController) for (const part of meshDataArray) this.appearanceController.cancelFor(part.expressId);
     // Cache max buffer size on first call
     if (this.cachedMaxBufferSize === 0) {
       this.cachedMaxBufferSize = this.getMaxBufferSize(device);
@@ -1263,6 +1289,7 @@ export class Scene {
    *     the IFC tombstone just means we ignore it for queries.
    */
   removeMeshesForEntity(expressId: number): boolean {
+    this.appearanceController?.forget(expressId);
     const meshDataList = this.meshDataMap.get(expressId);
     if (!meshDataList || meshDataList.length === 0) {
       this.boundingBoxes.delete(expressId);
@@ -1409,6 +1436,7 @@ export class Scene {
    * to a full reload if needed.
    */
   translateMeshesForEntity(expressId: number, delta: [number, number, number]): boolean {
+    this.appearanceController?.cancelFor(expressId);
     // An entity can have flat meshes, GPU-instanced occurrences, or both. The
     // instanced occurrences live in the per-template instance buffers, NOT in
     // meshDataMap, so the flat path below can't reach them — without this they
@@ -1657,6 +1685,7 @@ export class Scene {
    * Returns true when a mesh was modified.
    */
   rotateMeshesForEntity(expressId: number, angleRad: number, pivot: [number, number, number]): boolean {
+    this.appearanceController?.cancelFor(expressId);
     const meshDataList = this.meshDataMap.get(expressId);
     if (!meshDataList || meshDataList.length === 0) return false;
     if (angleRad === 0) return false;
@@ -2275,6 +2304,8 @@ export class Scene {
       return;
     }
 
+    this.appearanceController?.forget();
+
     // 1. Precompute and cache ALL entity bounding boxes before releasing data.
     // Same rule as `finishEphemeralStreaming`: an entity with no usable vertex
     // gets no entry rather than the inverted-empty sentinel (#2480).
@@ -2352,6 +2383,7 @@ export class Scene {
 
     // Update colors in meshDataMap and track affected batches
     for (const [expressId, newColor] of updates) {
+      this.appearanceController?.cancelFor(expressId);
       const meshDataList = this.meshDataMap.get(expressId);
       if (!meshDataList) continue;
 
@@ -3691,8 +3723,8 @@ export class Scene {
     if (!entry) return;
     entry.refs--;
     if (entry.refs <= 0) {
-      entry.texture.destroy();
       this.sharedTextures.delete(tm.sharedTextureKey);
+      entry.texture.destroy();
     }
   }
 
@@ -3755,6 +3787,7 @@ export class Scene {
    * is gone, so it is dropped like everything else here.
    */
   clearFlatGeometry(): void {
+    this.appearanceController?.forget();
     for (const mesh of this.meshes) destroyGpuResources(mesh);
     for (const batch of this.batchedMeshes) destroyGpuResources(batch);
     for (const tm of this.texturedMeshes) {
