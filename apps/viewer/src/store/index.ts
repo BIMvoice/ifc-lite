@@ -4,6 +4,7 @@
 
 /** Combined Zustand store. Domain slices own their state and actions. */
 
+import { createAppearanceSlice, type AppearanceSlice } from './slices/appearanceSlice.js';
 import { create } from 'zustand';
 
 // Import slices
@@ -135,9 +136,7 @@ export {
   parseIsoDate,
 } from './slices/scheduleSlice.js';
 export { resolveScheduleSourceModelId } from './slices/schedule-edit-helpers.js';
-
-// Combined store type
-export type ViewerState = LoadingSlice &
+export type ViewerState = AppearanceSlice & LoadingSlice &
   SelectionSlice &
   VisibilitySlice &
   UISlice &
@@ -277,6 +276,7 @@ const createViewerStore = () => create<ViewerState>()(withVisibilityOwnershipInv
   ...createZonesSlice(...args),
   ...createExtensionsSlice(...args),
   ...createSourcesSlice(...args),
+  ...createAppearanceSlice(...args),
 
   // Reset all viewer state when loading new file
   // Note: Does NOT clear models - use clearAllModels() for that

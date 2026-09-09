@@ -119,7 +119,7 @@ import {
  *  owns the single-tenant + re-dock + detach semantics; a second activation closes
  *  the panel back to the Information fallback. Closing any active analysis extension
  *  first preserves the prior "panels win the slot" behavior; kept as two thin helpers so every command action keeps its call site. */
-function activateRightPanel(panel: 'bcf' | 'ids' | 'lens' | 'clash' | 'compare' | 'extensions' | 'layers' | 'collab' | 'sources' | 'zones' | 'loadReport') {
+function activateRightPanel(panel: 'bcf' | 'ids' | 'lens' | 'clash' | 'compare' | 'extensions' | 'layers' | 'collab' | 'sources' | 'zones' | 'loadReport' | 'appearance') {
   closeActiveAnalysisExtension();
   useViewerStore.getState().toggleWorkspacePanel(panel);
 }
@@ -369,15 +369,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         action: () => { activateRightPanel('lens'); } },
       { id: 'panel:layers', label: 'Layer Stack', keywords: 'ifcx layers federation draft publish merge review provenance registry version overlay', category: 'Panels', icon: Layers,
         action: () => { activateRightPanel('layers'); } },
-      // Cloud sources and Location zones reached the two toolbars but not this
-      // list. Same shape as the gap that left Cloud sources rail-only: a panel
-      // is only as reachable as the LAST surface that learned about it.
+      // Keep workspace entry points aligned with the rail and both toolbars.
       { id: 'panel:sources', label: 'Cloud Sources', keywords: 'cde common data environment connect provider bim360 acc trimble dalux integration remote', category: 'Panels', icon: Cloud,
         action: () => { activateRightPanel('sources'); } },
       { id: 'panel:zones', label: 'Location Zones', keywords: 'zone section takt area construction location apportionment storey', category: 'Panels', icon: Box,
         action: () => { activateRightPanel('zones'); } },
       { id: 'panel:loadReport', label: 'Load Report', keywords: 'geometry diagnostics warnings dropped items csg openings unsupported load report', category: 'Panels', icon: FileWarning,
         action: () => { activateRightPanel('loadReport'); } },
+      { id: 'panel:appearance', label: 'Appearance', keywords: 'image texture upload UV planar box projection surfaces', category: 'Panels', icon: Palette,
+        action: () => { activateRightPanel('appearance'); } },
       ...(isCollabEnabled()
         ? [{ id: 'panel:collab', label: 'Collaboration Room', keywords: 'share invite live multiplayer presence room realtime sync', category: 'Panels' as const, icon: Users,
             action: () => { activateRightPanel('collab'); } }]
