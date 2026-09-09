@@ -37,7 +37,11 @@ export function expandAppearanceCorners(
     if (canonicalSourceIndices[i] !== source.sourceIndices[i])
       throw new Error('Appearance canonical source topology changed');
   }
-  if (!Number.isSafeInteger(canonicalTargetVertexCount) || canonicalTargetVertexCount <= 0 || canonicalTargetVertexCount > 0x100000000)
+  if (
+    !Number.isSafeInteger(canonicalTargetVertexCount) ||
+    canonicalTargetVertexCount <= 0 ||
+    canonicalTargetVertexCount > 0x100000000
+  )
     throw new Error('Appearance target vertex pool is invalid');
   for (let i = 0; i < canonicalTargetIndices.length; i++) {
     if (
@@ -97,10 +101,14 @@ export function equivalentAppearanceGeometry(
   options: { allowNormalChanges?: boolean } = {},
 ): boolean {
   for (const key of ['origin', 'localToWorld'] as const) {
-    const av = a[key], bv = b[key];
+    const av = a[key],
+      bv = b[key];
     if (av === undefined || bv === undefined) {
       if (av !== bv) return false;
-    } else if (av.length !== bv.length || av.some((value, i) => value !== bv[i])) {
+    } else if (
+      av.length !== bv.length ||
+      av.some((value, i) => value !== bv[i])
+    ) {
       return false;
     }
   }
