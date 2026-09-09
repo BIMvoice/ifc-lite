@@ -27,6 +27,25 @@ scripts/perf/flame.sh tests/models/ara3d/schependomlaan.ifc
 
 Fetch a fixture first if missing: `pnpm fixtures ara3d/schependomlaan.ifc`.
 
+## Canonical appearance provenance (#4243)
+
+Item-identified geometry now retains its canonical triangle-order identity at
+WASM extraction. A production-browser worker-load A/B against the same Rust
+runtime found a small median increase within the baseline run spread on the
+public AC20-FZK-Haus fixture; this is not an optimization or a speedup claim.
+All measured geometry/color/UV fingerprints and mesh/triangle counts matched.
+The additional metadata reuses existing index arrays, with no extra geometry
+buffer or transfer at extraction. Streaming fragments can retain an unsplit
+source index array; that memory lifetime still requires explicit downstream
+ownership and large-model qualification.
+
+The measurement boundary was completed metadata plus geometry worker output,
+with fresh Chromium processes and empty model caches. It did not measure
+renderer readiness: the stock combined viewer-readiness experiment encountered
+a baseline first-load viewport initialization race. Those failed samples were
+retained and excluded, not treated as successful loads. The lesson is to name
+and qualify the measured boundary before interpreting small load-time deltas.
+
 ## The native probe (`perf_probe`)
 
 `rust/processing/examples/perf_probe.rs`, wrapped by `probe.sh`. It drains the
