@@ -1,0 +1,215 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import '@/test/setup-dom.js';
+import { it } from 'node:test';
+import assert from 'node:assert/strict';
+import { AppearanceAssetInventory } from './assets.js';
+import { ModelAppearanceAssets, modelAppearanceAssets } from './model-assets.js';
+import { useViewerStore } from '@/store';
+import { fixtureModel, fixtureModels } from '@/test/store-fixture.js';
+const png = () => new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'));
+function image() { return { width: 1, height: 1, closes: 0, close() { this.closes++; } }; }
+const archive = () => ({ originalResources: new Map([['nested/Textures/Wood.PNG', png()]]), modelPath: 'nested/model.ifc' });
+
+// #4243: loaded geometry and portable exports have separate lifetimes.
+it('keeps original paths/encoded bytes through import, model replacement and federation close', async () => {
+  const bitmap = image();
+  const inventory = new AppearanceAssetInventory({ decode: async () => bitmap });
+  const models = new ModelAppearanceAssets(inventory);
+  for (const model of ['a', 'b', 'a']) {
+    const load = models.begin(model);
+    assert.equal((await load.decode(archive()))?.get('wood.png'), bitmap);
+    load.finish(true);
+  }
+  models.remove('a');
+  assert.equal(bitmap.closes, 0);
+  const exported = models.exportOriginals('b');
+  assert.equal(exported.modelPath, 'nested/model.ifc');
+  assert.deepEqual(exported.resources.get('nested/Textures/Wood.PNG'), png());
+  models.clear();
+  assert.equal(bitmap.closes, 1);
+  assert.equal(models.exportOriginals('b').resources.size, 0);
+});
+
+it('failed load releases decoded images without publishing original resources', async () => {
+  const bitmap = image();
+  const models = new ModelAppearanceAssets(new AppearanceAssetInventory({ decode: async () => bitmap }));
+  const load = models.begin('failed');
+  assert.throws(() => models.exportOriginals('failed'), /still loading/);
+  await load.decode(archive());
+  load.finish(false);
+  assert.equal(bitmap.closes, 1);
+  assert.equal(models.exportOriginals('failed').resources.size, 0);
+});
+
+it('model close during decode closes the late bitmap and prevents stale load publication', async () => {
+  let resolve!: (value: ReturnType<typeof image>) => void;
+  let started!: () => void;
+  const begun = new Promise<void>(yes => { started = yes; });
+  const bitmap = image();
+  const models = new ModelAppearanceAssets(new AppearanceAssetInventory({ decode: () => {
+    started();
+    return new Promise<ReturnType<typeof image>>(yes => { resolve = yes; });
+  } }));
+  const load = models.begin('closing');
+  const loading = load.decode(archive());
+  await begun;
+  models.remove('closing');
+  await assert.rejects(loading, { name: 'AbortError' });
+  resolve(bitmap);
+  await new Promise<void>(yes => setImmediate(yes));
+  load.finish(true);
+  assert.equal(bitmap.closes, 1);
+  assert.equal(models.exportOriginals('closing').resources.size, 0);
+});
+
+it('preserves distinct same-basename originals while existing viewer resolution stays first-wins', async () => {
+  const second = png(); second[second.length - 1] ^= 1;
+  const models = new ModelAppearanceAssets(new AppearanceAssetInventory({ decode: async () => image() }));
+  const load = models.begin('collisions');
+  const bitmaps = await load.decode({ originalResources: new Map([['a/wood.png', png()], ['b/wood.png', second]]) });
+  load.finish(true);
+  assert.equal(bitmaps?.size, 1);
+  const exported = models.exportOriginals('collisions');
+  assert.deepEqual(exported.resources.get('a/wood.png'), png());
+  assert.deepEqual(exported.resources.get('b/wood.png'), second);
+  models.clear();
+});
+
+// Exercise real teardown actions: a reset preserves models; close releases them.
+it('real model teardown keeps textures through view reset and releases on close/clear', async () => {
+  const previous = globalThis.createImageBitmap;
+  const bitmaps: ReturnType<typeof image>[] = [];
+  globalThis.createImageBitmap = async () => { const bitmap = image(); bitmaps.push(bitmap); return bitmap; };
+  try {
+    useViewerStore.setState(fixtureModels(fixtureModel('a'), fixtureModel('b')));
+    for (const id of ['a', 'b']) {
+      const load = modelAppearanceAssets.begin(id);
+      await load.decode(archive());
+      load.finish(true);
+    }
+    useViewerStore.getState().resetViewerState();
+    assert.equal(bitmaps[0].closes, 0);
+    assert.equal(modelAppearanceAssets.exportOriginals('a').resources.size, 1);
+    useViewerStore.getState().removeModel('a');
+    assert.equal(bitmaps[0].closes, 0);
+    assert.equal(modelAppearanceAssets.exportOriginals('a').resources.size, 0);
+    useViewerStore.getState().clearAllModels();
+    assert.equal(bitmaps[0].closes, 1);
+  } finally {
+    modelAppearanceAssets.clear();
+    globalThis.createImageBitmap = previous;
+  }
+});
+
+it('refuses incomplete portable export when an original image was rejected', async t => {
+  const warning = t.mock.method(console, 'warn', () => {});
+  const models = new ModelAppearanceAssets(new AppearanceAssetInventory({ decode: async () => image() }));
+  const load = models.begin('invalid');
+  const bitmaps = await load.decode({ originalResources: new Map([
+    ['a/wood.png', new Uint8Array([1, 2, 3])], ['b/wood.png', png()],
+  ]) });
+  load.finish(true);
+  // Preserve historical basename first-wins even when the first entry is invalid.
+  assert.equal(bitmaps, null);
+  assert.equal(warning.mock.callCount(), 1);
+  assert.throws(() => models.exportOriginals('invalid'), /a\/wood.png/);
+  models.clear();
+});
+
+it('does not claim a complete portable export when the parser omitted archive images', async () => {
+  const models = new ModelAppearanceAssets(new AppearanceAssetInventory({ decode: async () => image() }));
+  const load = models.begin('partial');
+  await load.decode({ ...archive(), resourcesIncomplete: true });
+  load.finish(true);
+  assert.throws(() => models.exportOriginals('partial'), /exceeded image extraction limits/);
+  models.clear();
+});
+
+it('registers authored uses only on Apply, preserves shared commands through undo and restores on redo', async () => {
+  const bitmap = image();
+  const inventory = new AppearanceAssetInventory({ decode: async () => bitmap });
+  const models = new ModelAppearanceAssets(inventory);
+  const owner = { kind: 'history' as const, id: 'history' };
+  const asset = await inventory.add(png(), { owner });
+  const uri = models.getAuthoredUri('model', asset.id);
+  assert.equal(models.exportResources('model').resources.size, 0);
+  models.registerAuthored('model', 'first', [asset.id]);
+  models.registerAuthored('model', 'second', [asset.id]);
+  models.unregisterAuthored('model', 'first');
+  assert.deepEqual(models.exportResources('model').resources.get(uri), png());
+  models.unregisterAuthored('model', 'second');
+  assert.equal(models.exportResources('model').resources.size, 0);
+  assert.ok(inventory.get(asset.id), 'history retains bytes for redo');
+  models.registerAuthored('model', 'first', [asset.id]);
+  inventory.releaseOwner(owner);
+  assert.deepEqual(models.exportResources('model').resources.get(uri), png());
+  models.clear();
+  assert.equal(inventory.get(asset.id), undefined);
+});
+
+it('rejects a forged imported digest basename and validates a whole registration before retaining', async () => {
+  const inventory = new AppearanceAssetInventory({ decode: async () => image() });
+  const models = new ModelAppearanceAssets(inventory);
+  const owner = { kind: 'source' as const, id: 'upload' };
+  const asset = await inventory.add(png(), { owner });
+  const other = png(); other[other.length - 1] ^= 1;
+  const load = models.begin('model');
+  await load.decode({ originalResources: new Map([[`another/${asset.exportName.split('/').pop()}`, other]]) });
+  load.finish(true);
+  assert.throws(() => models.getAuthoredUri('model', asset.id), /different content/);
+  assert.throws(() => models.registerAuthored('new-model', 'cmd', [asset.id, 'missing']), /released/);
+  inventory.releaseOwner(owner);
+  assert.equal(inventory.get(asset.id), undefined, 'failed registration did not retain the valid first asset');
+  models.clear();
+});
+
+// Allocation-footprint fixture: Convento's six 4096² JPEG images, without
+// allocating 384 MiB of pixel buffers in a unit test. Header dimensions match
+// the injected decoder's tracked bitmap footprint; real decoding is the viewer lab gate.
+it('retains all six Convento-sized JPEGs plus a new authoring source under default budgets', async () => {
+  const original = new Uint8Array(Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDx/9k=', 'base64'));
+  const frame = original.findIndex((value, index) => value === 0xff && original[index + 1] === 0xc0);
+  const resources = new Map<string, Uint8Array>();
+  for (let i = 0; i < 6; i++) {
+    const bytes = new Uint8Array(original);
+    const header = new DataView(bytes.buffer);
+    header.setUint16(frame + 5, 4096); header.setUint16(frame + 7, 4096);
+    bytes[bytes.length - 3] = i; // Distinct encoded identities, one bitmap each.
+    resources.set(`texture${i}.jpg`, bytes);
+  }
+  const decoded: Array<{ width: number; height: number; closes: number; close(): void }> = [];
+  const inventory = new AppearanceAssetInventory({ decode: async bytes => {
+    const large = bytes[0] === 0xff;
+    const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const bitmap = { width: large ? 4096 : header.getUint32(16), height: large ? 4096 : header.getUint32(20), closes: 0, close() { this.closes++; } };
+    decoded.push(bitmap); return bitmap;
+  } });
+  const models = new ModelAppearanceAssets(inventory);
+  const load = models.begin('convento');
+  assert.equal((await load.decode({ originalResources: resources }))?.size, 6);
+  load.finish(true);
+  const owner = { kind: 'draft' as const, id: 'new-image' };
+  const uploaded = png();
+  const header = new DataView(uploaded.buffer); header.setUint32(16, 1024); header.setUint32(20, 1024);
+  const asset = await inventory.add(uploaded, { owner });
+  await inventory.decode(asset.id, owner);
+  assert.equal(decoded.length, 7);
+  assert.equal(decoded[6].width, 1024);
+  assert.equal(models.exportResources('convento').resources.size, 6);
+  inventory.releaseOwner(owner); models.clear();
+  assert.ok(decoded.every(bitmap => bitmap.closes === 1));
+});
+
+it('surfaces archive decode budget failures instead of publishing partially textured geometry', async () => {
+  const other = png(); other[other.length - 1] ^= 1;
+  const bitmap = image();
+  const inventory = new AppearanceAssetInventory({ decode: async () => bitmap, limits: { maxDecodedBytes: 4 } });
+  const models = new ModelAppearanceAssets(inventory);
+  const load = models.begin('over-budget');
+  await assert.rejects(load.decode({ originalResources: new Map([['one.png', png()], ['two.png', other]]) }), /Decoded image budget exceeded/);
+  load.finish(false);
+  assert.equal(bitmap.closes, 1);
+  assert.equal(models.exportResources('over-budget').resources.size, 0);
+});
