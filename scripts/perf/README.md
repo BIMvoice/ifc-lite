@@ -931,3 +931,17 @@ Embedded-header preflight reads PNG dimensions directly and walks bounded JPEG
 markers through the STEP hex bytes. It neither copies the complete compressed
 image nor allocates pixels before the plan budget is checked; ordinary raster
 decoding remains unchanged.
+
+### Effective appearance scope catalog (#4243)
+
+The optional Rust catalog shares the planner's bounded effective-source decoder
+and returns canonical product classes and type identities; it does not add a
+call to ordinary model loading. Exact source-built base and branch WASM
+distributions were compared through the actual browser worker pool in fresh,
+interleaved processes. Every geometry fingerprint matched and no material
+ordinary-load regression was observed within sample variation. This is a
+regression check, not a speedup claim or a measurement of catalog latency.
+Retain the bounded decode and shared cancellation lifecycle instead of
+reimplementing IFC type relationships in the UI. Reproduction provenance and
+samples are in `appearance-catalog-load-evidence.json`; the observation ends at
+worker-model readiness, not renderer readiness.
