@@ -5,9 +5,12 @@ import '@/test/setup-dom.js';
 import { afterEach, describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { crc32 } from 'node:zlib';
-import { IfcParser, EntityExtractor } from '@ifc-lite/parser';
+import { IfcParser, EntityExtractor, unwrapIfcZipWithResources } from '@ifc-lite/parser';
 import { MutablePropertyView, StoreEditor } from '@ifc-lite/mutations';
 import { StepExporter } from '@ifc-lite/export';
+import { prepareAppearanceSerialization } from './serialization.js';
+import { createExportAdapter } from '@/sdk/adapters/export-adapter.js';
+import { exportChangedModelToStep } from '../export/changed-model-export.js';
 import type { AppearancePreview, Renderer } from '@ifc-lite/renderer';
 import { expandAppearanceCorners } from '@ifc-lite/renderer';
 import { AppearancePreviewController } from '../../../../../packages/renderer/src/appearance-preview.js';
@@ -172,6 +175,46 @@ END-ISO-10303-21;`);
 }
 
 describe('appearance command atomicity #4243', () => {
+  it('portable export omits history-only authored rows and images without changing Undo/Redo (#4243)', async () => {
+    const f = await fixture(); f.commit();
+    const second = await applyNext(f, 2);
+    const before = f.snapshot();
+    const data = useViewerStore.getState().models.get(MODEL)!.ifcDataStore!;
+    const artifact = await exportChangedModelToStep(MODEL, data, f.view,
+      { schema: 'IFC4', scheduleState: null, description: 'history export' });
+    assert.ok(artifact.content instanceof Uint8Array);
+    const archive = await unwrapIfcZipWithResources(new Uint8Array(artifact.content).buffer);
+    const parsed = await new IfcParser().parseColumnar(archive.model);
+    for (const entity of f.plan.created) assert.equal(parsed.entityIndex.byId.has(entity.expressId), false,
+      `superseded authored row #${entity.expressId} became a permanent imported orphan`);
+    for (const entity of second.plan.created) assert.equal(parsed.entityIndex.byId.has(entity.expressId), true);
+    assert.equal(archive.originalResources.size, 1);
+    const snapshot = prepareAppearanceSerialization(MODEL, data, f.view);
+    assert.equal(snapshot.view!.peekNextExpressId(), f.view.peekNextExpressId(), 'planning keeps the live allocator watermark');
+    const planningBytes = new StepExporter(data, snapshot.view).export({ schema: 'IFC4', applyMutations: true }).content;
+    const planningIfc = await new IfcParser().parseColumnar(new Uint8Array(planningBytes).buffer);
+    assert.equal(planningIfc.entityIndex.byId.has(f.plan.created[1].expressId), false, 'planning excludes superseded UV payload');
+    const sdk = createExportAdapter(useViewerStore).ifc([{ modelId: MODEL, expressId: 25 }], {});
+    assert.ok(sdk instanceof Uint8Array);
+    const sdkArchive = await unwrapIfcZipWithResources(new Uint8Array(sdk).buffer);
+    assert.equal(sdkArchive.originalResources.size, 1, 'SDK subset packages only surviving authored assets');
+    assert.deepEqual(f.snapshot(), before, 'serialization cannot mutate live IFC, allocator or history');
+    assert.equal(modelAppearanceAssets.exportResources(MODEL).resources.size, 2, 'both live history leases remain');
+    useViewerStore.getState().undo(MODEL);
+    assert.ok(f.view.getNewEntity(f.plan.created[0].expressId), 'original image is available to Undo');
+    useViewerStore.getState().redo(MODEL);
+    assert.deepEqual(f.snapshot().exported, before.exported);
+  });
+  it('serialization failure preserves live IFC and rejects a different model view (#4243)', async () => {
+    const f = await fixture(); f.commit(); await applyNext(f, 2);
+    const before = f.snapshot();
+    const data = useViewerStore.getState().models.get(MODEL)!.ifcDataStore!;
+    assert.throws(() => prepareAppearanceSerialization(MODEL, data, new MutablePropertyView(data.properties, MODEL)), /different model revision/);
+    mock.method(modelAppearanceAssets, 'exportResources', () => { throw new Error('Missing encoded image'); });
+    assert.throws(() => prepareAppearanceSerialization(MODEL, data, f.view), /Missing encoded image/);
+    assert.deepEqual(f.snapshot(), before);
+    assert.ok(appearanceAssets.get(f.asset.id));
+  });
   it('rejects a stale SDK positional edit after preview without overwriting it (#4243)', async () => {
     const f = await fixture();
     createStoreAdapter(useViewerStore).setPositionalAttribute({ modelId: MODEL, expressId: 19 }, 1, ['#14']);
