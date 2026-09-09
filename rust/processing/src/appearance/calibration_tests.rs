@@ -79,6 +79,34 @@ fn issue_4260_diagonal_landmarks_and_vertical_plane_preserve_known_distance() {
 }
 
 #[test]
+fn issue_4260_partial_coordinate_collapse_rejects_distorted_diagonal_planes() {
+    let mut r = request();
+    r.world_anchor = [1e16, 0., 0.];
+    r.world_direction = [1., 1., 0.];
+    r.plane_normal = [0., 0., 1.];
+    r.raster_to_source = [1., 0., 0., -1., 0., 1.];
+    r.raster_size = [1, 1];
+    r.source_points = [[0., 0.], [1., 0.]];
+    r.distance_metres = 1.;
+    assert!(calibrate_appearance_plane(&r).unwrap_err().contains("coordinate precision"));
+
+    // Ordinary georeferencing remains usable without giving distorted large
+    // coordinates a tolerance proportional to their absolute magnitude.
+    r.world_anchor = [5_000_000., 4_000_000., 100.];
+    let plane = calibrate_appearance_plane(&r).unwrap();
+    for edge in 0..4 {
+        let delta = std::array::from_fn(|i| plane.raster_corners[(edge + 1) % 4][i]
+            - plane.raster_corners[edge][i]);
+        assert!((length(delta) - 1.).abs() < 1e-8);
+    }
+    // A long horizontal edge must not mask loss of the narrow vertical edge.
+    r.world_direction = [1., 0., 0.];
+    r.world_anchor = [0., 1e16, 0.];
+    r.raster_to_source = [1e10, 0., 0., -1., 0., 0.];
+    assert!(calibrate_appearance_plane(&r).is_err());
+}
+
+#[test]
 fn issue_4260_invalid_or_unrepresentable_calibration_is_never_a_default_scale() {
     let cases: [fn(&mut PlaneCalibrationRequest); 12] = [
         |r| r.source_points[1] = r.source_points[0],

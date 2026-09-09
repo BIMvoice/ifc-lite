@@ -524,7 +524,9 @@ world-space `Mapping::Planar`, raster corners and metres per source unit.
 Crop, page rotation and raster DPI only change the raster-to-source transform;
 they do not change the retained calibration landmarks or measured distance.
 This bounded calculation does not mutate IFC or composite pixels outside the
-page. Invalid, sheared or unrepresentable planes fail explicitly.
+page. Invalid, sheared or unrepresentable planes fail explicitly. Reconstructed
+world edges and anchor displacement must each preserve their intended vector
+within one part per million; large origins never enlarge that tolerance.
 
 `ifc_lite_processing::appearance::plan_appearance` prepares image and UV edits
 against an effective IFC STEP snapshot. It shares canonical geometry production

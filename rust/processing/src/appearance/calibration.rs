@@ -37,6 +37,13 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 fn length(v: [f64; 3]) -> f64 { v[0].hypot(v[1]).hypot(v[2]) }
+// Bound each reconstructed vector independently to one part per million.
+// Checking only distinct corners misses partial coordinate collapse, while a
+// tolerance based on the longest edge hides distortion of narrow rectangles.
+fn preserves_vector(start: [f64; 3], end: [f64; 3], intended: [f64; 3]) -> bool {
+    let error = length(std::array::from_fn(|i| (end[i] - start[i]) - intended[i]));
+    error.is_finite() && error <= length(intended) * 1e-6
+}
 fn unit(v: [f64; 3]) -> Result<[f64; 3], String> {
     let len = length(v);
     if !v.iter().all(|v| v.is_finite()) || !len.is_finite() || len <= 0. {
@@ -103,7 +110,11 @@ pub fn calibrate_appearance_plane(request: &PlaneCalibrationRequest) -> Result<C
     let corners = [top_left, top_right, bottom_right, bottom_left];
     if !corners.iter().flatten().all(|v| v.is_finite())
         || !width.is_finite() || !height.is_finite() || width <= 0. || height <= 0.
-        || top_left == top_right || top_left == bottom_left {
+        || !preserves_vector(r.world_anchor, top_left, top_offset)
+        || !preserves_vector(top_left, top_right, axis_u.map(|v| v * width))
+        || !preserves_vector(bottom_left, bottom_right, axis_u.map(|v| v * width))
+        || !preserves_vector(bottom_left, top_left, axis_v.map(|v| v * height))
+        || !preserves_vector(bottom_right, top_right, axis_v.map(|v| v * height)) {
         return Err("The calibrated plane exceeds coordinate precision; use a local world frame".into());
     }
     Ok(CalibratedPlane {

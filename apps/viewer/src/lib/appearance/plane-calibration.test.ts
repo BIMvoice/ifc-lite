@@ -62,5 +62,10 @@ test('actual WASM calibrates a rotated page once across object boundaries and ra
     rasterToSource: [0, 0.25, 0.25, 0, 10, 20], rasterSize: [400, 800] });
   assert.deepEqual(higherDpi, result);
   await assert.rejects(calibrateAppearancePlane({ ...request, distanceMetres: 0 }), /positive measured distance/);
+  await assert.rejects(calibrateAppearancePlane({ ...request,
+    worldAnchor: [1e16, 0, 0], worldDirection: [1, 1, 0],
+    rasterToSource: [1, 0, 0, -1, 0, 1], rasterSize: [1, 1],
+    sourcePoints: [[0, 0], [1, 0]], distanceMetres: 1,
+  }), /coordinate precision/);
   assert.deepEqual(await calibrateAppearancePlane(request), result, 'rejected calibration leaves later calls usable');
 });

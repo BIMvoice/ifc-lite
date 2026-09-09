@@ -86,7 +86,9 @@ not establish drawing scale. Keep the native landmarks when recropping or
 rotating the raster. The returned mapping uses IFC's bottom-left UV origin.
 
 Zero spans, invalid directions, sheared rasters, oversized images and
-unrepresentable coordinates return errors. Calibrating a plane does not provide
+unrepresentable coordinates return errors. Each reconstructed edge and anchor
+displacement must preserve its intended vector within one part per million,
+independently of the absolute world origin. Calibrating a plane does not provide
 bounded image compositing: preserving prior appearance outside a PDF page
 requires the separate projection/bake stage.
 
