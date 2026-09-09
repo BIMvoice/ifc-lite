@@ -584,5 +584,54 @@ describe('SpatialHierarchyBuilder', () => {
 
       expect(hierarchy.ambiguousStorey!.has(4)).toBe(true);
     });
+
+    it('flags the same element as ambiguous regardless of which storey elementToStorey resolves to', () => {
+      // spatial-hierarchy-ambiguity.ts's doc claims computeAmbiguousStorey() is
+      // agnostic to the elementToStorey tie-break. Prove it: two fixtures with
+      // IDENTICAL IfcRelContainedInSpatialStructure declaration order (storey A's
+      // edge #200 always declared before storey B's edge #201) but REVERSED
+      // IfcRelAggregates order flip which storey elementToStorey resolves the
+      // wall to (last storey visited in the aggregation-driven tree walk wins,
+      // since the direct-containment loop assigns unconditionally - see
+      // spatial-hierarchy-ambiguity.ts). ambiguousStorey must report `true` for
+      // the wall in BOTH fixtures even though the winner differs between them.
+      const build = (aggregatesOrder: readonly [number, number]) => {
+        const strings = new StringTable();
+        const entities = new EntityTableBuilder(4, strings);
+        entities.add(1, 'IFCPROJECT', 'p0', 'Project', '', '');
+        entities.add(2, 'IFCBUILDINGSTOREY', 's0', 'Storey A', '', '');
+        entities.add(3, 'IFCBUILDINGSTOREY', 's1', 'Storey B', '', '');
+        entities.add(4, 'IFCWALL', 'w0', 'Wall', '', '', true);
+
+        const relationships = new RelationshipGraphBuilder();
+        const [first, second] = aggregatesOrder;
+        relationships.addEdge(1, first, RelationshipType.Aggregates, 100);
+        relationships.addEdge(1, second, RelationshipType.Aggregates, 101);
+        // Containment declaration order held constant across both fixtures:
+        // storey A's edge is always declared first, storey B's second.
+        relationships.addEdge(2, 4, RelationshipType.ContainsElements, 200);
+        relationships.addEdge(3, 4, RelationshipType.ContainsElements, 201);
+
+        return new SpatialHierarchyBuilder().build(
+          entities.build(),
+          relationships.build(),
+          strings,
+          new Uint8Array(),
+          { byId: { get: () => undefined } },
+        );
+      };
+
+      const aggregatesAThenB = build([2, 3]);
+      const aggregatesBThenA = build([3, 2]);
+
+      // The winner differs between the two fixtures (proving the tie-break is
+      // aggregation-order dependent, not declaration-order dependent)...
+      expect(aggregatesAThenB.elementToStorey.get(4)).not.toBe(
+        aggregatesBThenA.elementToStorey.get(4),
+      );
+      // ...but the ambiguity signal itself does not.
+      expect(aggregatesAThenB.ambiguousStorey!.has(4)).toBe(true);
+      expect(aggregatesBThenA.ambiguousStorey!.has(4)).toBe(true);
+    });
   });
 });
