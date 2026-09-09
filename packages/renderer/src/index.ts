@@ -12,6 +12,10 @@ export { RenderPipeline } from './pipeline.js';
 export { Camera } from './camera.js';
 // The MEASURED surface `getScene()` publishes — see its docs.
 export type { SceneContents } from './scene-contents.js';
+export { expandAppearanceCorners, equivalentAppearanceGeometry } from './appearance-uvs.js';
+export type { AppearancePreview, AppearanceOwner, AppearanceToken, AppearanceChange } from './appearance-preview.js';
+import type { AppearancePreview } from './appearance-preview.js';
+import { resizeRendererViewport } from './renderer-viewport.js';
 export type { ProjectionMode } from './camera-state.js';
 export type { InteractionMode } from './camera-controls.js';
 export { pickFitPolicy } from './camera-fit-policy.js';
@@ -3342,19 +3346,13 @@ export class Renderer {
      * Resize canvas
      */
     resize(width: number, height: number): void {
-        // `canvas.width` is an IDL `unsigned long`, so it silently coerces a
-        // non-finite or negative argument to **0** — a zero drawing buffer
-        // that every pick guard in this package misses, because they all
-        // check the bounding rect rather than the buffer. `unprojectToRay`
-        // then divides by it. This is documented public API of a published
-        // package (`docs/api/typescript.md`), so an external caller wiring a
-        // ResizeObserver to it is the reachable route; both in-repo callers
-        // already floor their own values. Keep the last usable size, the same
-        // policy `setAspect` uses for the ratio it derives (#2473).
-        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
-        this.canvas.width = width;
-        this.canvas.height = height;
-        this.camera.setAspect(width / height);
+        resizeRendererViewport(this.canvas, this.camera, width, height);
+    }
+
+    /** Owned, reversible appearance edits; model geometry remains unchanged. */
+    getAppearancePreview(): AppearancePreview {
+        if (!this.pipeline) throw new Error('Renderer must be initialized before previewing appearance');
+        return this.scene.appearancePreview(this.device.getDevice(), this.pipeline);
     }
 
     getCamera(): Camera {

@@ -6,6 +6,9 @@
  * Scene graph and mesh management
  */
 
+import { createSceneBatch } from './scene-batch-upload.js';
+import { createSceneAppearancePreview } from './scene-appearance-preview.js';
+import { interleaveTexturedVertices } from './textured-vertices.js';
 import { RgbaTexturePool } from './rgba-texture-pool.js';
 import { splitMeshForStreaming } from './scene-stream-split.js';
 import type { Mesh, BatchedMesh, Vec3, PickClipState } from './types.js';
@@ -21,11 +24,9 @@ import {
   rayIntersectsBox,
 } from './scene-raycaster.js';
 import { selectBoundingBoxesInRect } from './scene-rect-select.js';
-import { mergeGeometry, splitMeshDataForBufferLimit, colorSaltByte, packEntityLane, worldAabbFromPieces, destroyGpuResources } from './scene-geometry.js';
+import { mergeGeometry, splitMeshDataForBufferLimit, worldAabbFromPieces, destroyGpuResources } from './scene-geometry.js';
 import { sumResidentGpuBytes, type ResidentGpuBytes } from './render-stats.js';
 import { composeInstancedOverrideColor } from './instanced-override-color.js';
-import { simplifyIndicesByClustering, lodCellSizeForBounds, LOD_MIN_TRIANGLES } from './lod-simplify.js';
-import { quantizeInterleaved } from './quantize.js';
 import { bucketBaseKeyFor, type SpatialChunkingConfig } from './chunk-grid.js';
 import { VisibilityEpochTracker } from './visibility-epoch.js';
 import { isEntityVisible } from './entity-visibility.js';
@@ -236,6 +237,29 @@ export class Scene {
    *  Refcounted: entries die when the last referencing mesh is removed / on clear(). */
   private sharedTextures = new Map<number, { texture: GPUTexture; refs: number }>();
   private rgbaTexturePool = new RgbaTexturePool();
+  private appearanceController?: ReturnType<typeof createSceneAppearancePreview>;
+
+  appearancePreview(device: GPUDevice, pipeline: RenderPipeline) {
+    return this.appearanceController ??= createSceneAppearancePreview({
+      meshes: () => this.texturedMeshes, data: this.meshDataMap,
+      hasInstances: id => this.instancedEntityMap.has(id),
+      ready: () => !this.geometryReleased && !this.pendingBatchKeys.size && !this.streamingFragments.length,
+      buckets: {
+        buckets: this.buckets, reverse: () => this.meshDataBucket,
+        create: (parts, key) => this.createBatchedMesh(parts, parts[0].color, device, pipeline, key),
+        release: batch => { this.dropPartialCacheForBatch(batch); this.lastDrawnFrame.delete(batch.id); destroyGpuResources(batch); },
+        changed: key => this.markBucketDirty(key),
+        refresh: () => { this.batchedMeshes = [...this.buckets.values()].flatMap(b => b.batchedMesh ? [b.batchedMesh] : []); },
+      },
+      upload: part => this.createTexturedMesh(part, device, pipeline),
+      release: mesh => {
+        mesh.vertexBuffer.destroy(); mesh.indexBuffer.destroy(); mesh.uniformBuffer.destroy();
+        this.releaseTexturedMeshTexture(mesh);
+      },
+      invalidate: id => { this.boundingBoxes.delete(id); this.evictHighlightMeshes(id); },
+    });
+  }
+
   private texturedDevice?: GPUDevice;                               // #961: cached for textured-mesh re-upload on translate
   /** GPU-instancing: unique templates + per-occurrence buffers (fed by
    *  addInstancedShard). SLOT-STABLE and therefore SPARSE: a per-model removal
@@ -790,6 +814,7 @@ export class Scene {
       const lastDrawn = this.lastDrawnFrame.get(b.id) ?? -1;
       if (lastDrawn === this.residencyFrame) continue;      // drawn this frame: not evictable
       if (bucket.meshData.length === 0) continue;           // no rebuild source: keep resident
+      if (bucket.meshData.some(part => this.appearanceController?.owns(part.expressId))) continue;
       shells.push({ key: bucket.key, bytes, lastDrawnFrame: lastDrawn });
     }
     if (residentBytes <= budget) return;
@@ -1117,6 +1142,7 @@ export class Scene {
    * when streaming completes to do one O(N) full merge.
    */
   appendToBatches(meshDataArray: MeshData[], device: GPUDevice, pipeline: RenderPipeline, isStreaming: boolean = false): void {
+    if (this.appearanceController) for (const part of meshDataArray) this.appearanceController.cancelFor(part.expressId);
     // Cache max buffer size on first call
     if (this.cachedMaxBufferSize === 0) {
       this.cachedMaxBufferSize = this.getMaxBufferSize(device);
@@ -1263,6 +1289,7 @@ export class Scene {
    *     the IFC tombstone just means we ignore it for queries.
    */
   removeMeshesForEntity(expressId: number): boolean {
+    this.appearanceController?.forget(expressId);
     const meshDataList = this.meshDataMap.get(expressId);
     if (!meshDataList || meshDataList.length === 0) {
       this.boundingBoxes.delete(expressId);
@@ -1409,6 +1436,7 @@ export class Scene {
    * to a full reload if needed.
    */
   translateMeshesForEntity(expressId: number, delta: [number, number, number]): boolean {
+    this.appearanceController?.cancelFor(expressId);
     // An entity can have flat meshes, GPU-instanced occurrences, or both. The
     // instanced occurrences live in the per-template instance buffers, NOT in
     // meshDataMap, so the flat path below can't reach them — without this they
@@ -1512,7 +1540,7 @@ export class Scene {
       if (texturedData.length > 0) {
         const entries = this.texturedMeshes.filter((tm) => tm.expressId === expressId);
         for (let i = 0; i < entries.length && i < texturedData.length; i++) {
-          const interleaved = this.interleaveTexturedVertices(texturedData[i]);
+          const interleaved = interleaveTexturedVertices(texturedData[i]);
           if (interleaved) {
             this.texturedDevice.queue.writeBuffer(entries[i].vertexBuffer, 0, interleaved);
           }
@@ -1657,6 +1685,7 @@ export class Scene {
    * Returns true when a mesh was modified.
    */
   rotateMeshesForEntity(expressId: number, angleRad: number, pivot: [number, number, number]): boolean {
+    this.appearanceController?.cancelFor(expressId);
     const meshDataList = this.meshDataMap.get(expressId);
     if (!meshDataList || meshDataList.length === 0) return false;
     if (angleRad === 0) return false;
@@ -1705,7 +1734,7 @@ export class Scene {
       if (texturedData.length > 0) {
         const entries = this.texturedMeshes.filter((tm) => tm.expressId === expressId);
         for (let i = 0; i < entries.length && i < texturedData.length; i++) {
-          const interleaved = this.interleaveTexturedVertices(texturedData[i]);
+          const interleaved = interleaveTexturedVertices(texturedData[i]);
           if (interleaved) {
             this.texturedDevice.queue.writeBuffer(entries[i].vertexBuffer, 0, interleaved);
           }
@@ -2275,6 +2304,8 @@ export class Scene {
       return;
     }
 
+    this.appearanceController?.forget();
+
     // 1. Precompute and cache ALL entity bounding boxes before releasing data.
     // Same rule as `finishEphemeralStreaming`: an entity with no usable vertex
     // gets no entry rather than the inverted-empty sentinel (#2480).
@@ -2352,6 +2383,7 @@ export class Scene {
 
     // Update colors in meshDataMap and track affected batches
     for (const [expressId, newColor] of updates) {
+      this.appearanceController?.cancelFor(expressId);
       const meshDataList = this.meshDataMap.get(expressId);
       if (!meshDataList) continue;
 
@@ -2444,171 +2476,18 @@ export class Scene {
    *   participate in the main buckets map).
    */
   private createBatchedMesh(
-    meshDataArray: MeshData[],
-    color: [number, number, number, number],
-    device: GPUDevice,
-    pipeline: RenderPipeline,
-    bucketKey?: string
+    meshes: MeshData[], color: [number, number, number, number],
+    device: GPUDevice, pipeline: RenderPipeline, bucketKey?: string,
   ): BatchedMesh {
-    // Use ONE shared scene origin for every batch (set from the first batch's
-    // world bbox centre). A per-batch origin would make abutting elements in
-    // different colour batches diverge by a few f32 ULP at building-scale world
-    // coords → seam/end-cap z-fighting. A shared origin makes every coincident
-    // world point relativize identically → no seam z-fight, and the model
-    // sits at most ±(model extent) from it (f32-precise at building scale).
-    const merged = this.mergeGeometry(meshDataArray, this.sharedFrameOrigin ?? undefined);
-    if (!this.sharedFrameOrigin && (merged.origin[0] || merged.origin[1] || merged.origin[2])) {
-      this.sharedFrameOrigin = merged.origin;
-    }
-    const expressIds = meshDataArray.map(m => m.expressId);
-    // Parallel to `expressIds` (same index = same source piece) so picking
-    // can scope each batch ENTRY to its own model — batches group by colour,
-    // not by model, so distinct models sharing an expressId+colour can be
-    // co-batched (see BatchedMesh.modelIndices doc).
-    const modelIndices = meshDataArray.map(m => m.modelIndex);
-
-    // Create vertex buffer (interleaved positions + normals)
-    // Use mappedAtCreation to avoid a separate writeBuffer IPC round-trip
-    // (significant win on Chrome/Dawn where each writeBuffer is a Mojo IPC call)
-    // Quantized path (issue #1682 phase 6): 12-byte lattice records instead
-    // of the 28-byte f32 layout. Falls back to f32 when the batch exceeds
-    // the u16 lattice range. Order note: the LOD build further down reads
-    // merged.vertexData (the CPU f32 copy) and produces INDICES only, which
-    // are valid for either vertex format.
-    // This function allocates a RUN of GPU buffers (vertex, index, uniform,
-    // and — when LOD1 qualifies — a second index buffer). `device.createBuffer`
-    // genuinely throws in production (scene.ts:2057 / index.ts:168 document a
-    // real "createBuffer failed, size (...) is too large" RangeError), so every
-    // buffer created earlier in the run must be destroyed before a later throw
-    // propagates — otherwise it is orphaned: allocated, never referenced again,
-    // never freed. Same paired-allocation idiom as `appendChunkToNode` /
-    // `DeviationPipeline.uploadBvh` (see paired-buffer-leak.test.ts), generalised
-    // to a run of N instead of a pair.
-    const allocated: GPUBuffer[] = [];
-    const createTracked = (desc: GPUBufferDescriptor): GPUBuffer => {
-      let buf: GPUBuffer;
-      try {
-        buf = device.createBuffer(desc);
-      } catch (err) {
-        for (const b of allocated) {
-          try {
-            b.destroy();
-          } catch (destroyErr) {
-            // Non-fatal: surfaced rather than swallowed, per the no-silent-catch
-            // house rule — this firing would mean a real teardown bug.
-            console.warn('[Scene] failed to release a batch buffer after a paired allocation failure', destroyErr);
-          }
-        }
-        throw err;
-      }
-      allocated.push(buf);
-      return buf;
-    };
-
-    let quantized: { min: [number, number, number]; step: number } | undefined;
-    let vertexBuffer: GPUBuffer;
-    const quantizedData = this.quantizedBatchesEnabled
-      ? quantizeInterleaved(merged.vertexData, BATCH_CONSTANTS.BYTES_PER_VERTEX / 4)
-      : null;
-    if (quantizedData) {
-      vertexBuffer = createTracked({
-        size: Math.max(4, quantizedData.vertexData.byteLength),
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-      });
-      new Uint8Array(vertexBuffer.getMappedRange())
-        .set(new Uint8Array(quantizedData.vertexData));
-      vertexBuffer.unmap();
-      quantized = { min: quantizedData.quantMin, step: quantizedData.step };
-    } else {
-      vertexBuffer = createTracked({
-        size: merged.vertexData.byteLength,
-        usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-        mappedAtCreation: true,
-      });
-      new Float32Array(vertexBuffer.getMappedRange()).set(merged.vertexData);
-      vertexBuffer.unmap();
-    }
-
-    // Create index buffer
-    const indexBuffer = createTracked({
-      size: merged.indices.byteLength,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-      mappedAtCreation: true,
-    });
-    new Uint32Array(indexBuffer.getMappedRange()).set(merged.indices);
-    indexBuffer.unmap();
-
-    // Create uniform buffer for this batch
-    const uniformBuffer = createTracked({
-      size: pipeline.getUniformBufferSize(),
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
-    // Create bind group
-    const bindGroup = device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(),
-      entries: [
-        {
-          binding: 0,
-          resource: { buffer: uniformBuffer },
-        },
-      ],
-    });
-
-    // LOD1 (issue #1682 phase 5): simplified second index range over the SAME
-    // vertex buffer. Bucket-owned batches only (`bucketKey` present) — the
-    // transient streaming fragments and partial/overlay sub-batches never pay
-    // the build. Positions in `merged.vertexData` are relative to the batch
-    // origin, which is fine: clustering is translation-invariant as long as
-    // the cell size comes from the same-space bounds extent.
-    let lod1IndexBuffer: GPUBuffer | undefined;
-    let lod1IndexCount: number | undefined;
-    if (
-      this.lodBuildsEnabled &&
-      bucketKey !== undefined &&
-      merged.bounds &&
-      merged.indices.length >= LOD_MIN_TRIANGLES * 3
-    ) {
-      const cellSize = lodCellSizeForBounds(merged.bounds.min, merged.bounds.max);
-      const lodIndices = simplifyIndicesByClustering(
-        merged.vertexData,
-        BATCH_CONSTANTS.BYTES_PER_VERTEX / 4,
-        merged.indices,
-        cellSize,
-      );
-      if (lodIndices) {
-        lod1IndexBuffer = createTracked({
-          size: lodIndices.byteLength,
-          usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-          mappedAtCreation: true,
-        });
-        new Uint32Array(lod1IndexBuffer.getMappedRange()).set(lodIndices);
-        lod1IndexBuffer.unmap();
-        lod1IndexCount = lodIndices.length;
-      }
-    }
-
-    return {
-      id: this.nextBatchId++,
-      colorKey: bucketKey ?? this.colorKey(color),
-      vertexBuffer,
-      indexBuffer,
-      indexCount: merged.indices.length,
-      color,
-      expressIds,
-      bindGroup,
-      uniformBuffer,
-      bounds: merged.bounds,
-      modelIndices,
-      // Per-batch local frame: positions are stored relative to this; the draw
-      // loop applies model = translate(origin) so they land in world space.
-      origin: merged.origin,
-      ...(lod1IndexBuffer ? { lod1IndexBuffer, lod1IndexCount } : {}),
-      ...(quantized ? { quantized } : {}),
-    };
+    const result = createSceneBatch(meshes, color, device, pipeline, {
+      id: this.nextBatchId, colorKey: bucketKey ?? this.colorKey(color),
+      origin: this.sharedFrameOrigin ?? undefined,
+      quantized: this.quantizedBatchesEnabled, lod: this.lodBuildsEnabled,
+    }, bucketKey);
+    this.nextBatchId++;
+    if (!this.sharedFrameOrigin && result.origin?.some(value => value !== 0)) this.sharedFrameOrigin = result.origin;
+    return result;
   }
-
 
   /**
    * Merge multiple mesh geometries into single vertex/index buffers.
@@ -3728,48 +3607,11 @@ export class Scene {
       Boolean(meshData.texture || (meshData.textureRef && meshData.textureBitmap));
   }
 
-  /**
-   * Interleave a textured mesh's vertices into the stride-36 layout
-   * `[px,py,pz, nx,ny,nz, entityId(u32), u,v]`. Shared by initial upload and
-   * the translate re-upload so the two can't drift. Returns null when the mesh
-   * has no texture/uvs/geometry.
-   */
-  private interleaveTexturedVertices(meshData: MeshData): ArrayBuffer | null {
-    const uvs = meshData.uvs;
-    if (!Scene.hasRenderableTexture(meshData) || !uvs) return null;
-    const positions = meshData.positions;
-    const normals = meshData.normals;
-    const vertexCount = positions.length / 3;
-    if (vertexCount === 0 || meshData.indices.length === 0) return null;
-
-    const interleaved = new ArrayBuffer(vertexCount * 36);
-    const f = new Float32Array(interleaved);
-    const u = new Uint32Array(interleaved);
-    const entityIds = meshData.entityIds;
-    // Match mergeGeometry's entityId-lane packing so an overlay (lens/IDS/...)
-    // drawn over a textured mesh computes the same z-nudge → depthCompare:'equal'
-    // matches. High 8 bits = colour salt, low 24 = picking id.
-    const saltByte = colorSaltByte(meshData.color);
-    for (let i = 0; i < vertexCount; i++) {
-      const o = i * 9;
-      f[o] = positions[i * 3];
-      f[o + 1] = positions[i * 3 + 1];
-      f[o + 2] = positions[i * 3 + 2];
-      f[o + 3] = normals[i * 3] ?? 0;
-      f[o + 4] = normals[i * 3 + 1] ?? 0;
-      f[o + 5] = normals[i * 3 + 2] ?? 0;
-      u[o + 6] = packEntityLane(entityIds ? entityIds[i] : meshData.expressId, saltByte);
-      f[o + 7] = uvs[i * 2] ?? 0;
-      f[o + 8] = uvs[i * 2 + 1] ?? 0;
-    }
-    return interleaved;
-  }
-
   private createTexturedMesh(meshData: MeshData, device: GPUDevice, pipeline: RenderPipeline): void {
     const tex = meshData.texture;
     const ref = meshData.textureRef;
     const bitmap = meshData.textureBitmap;
-    const interleaved = this.interleaveTexturedVertices(meshData);
+    const interleaved = interleaveTexturedVertices(meshData);
     if (!interleaved || !(tex || (ref && bitmap))) return;
     this.texturedDevice = device; // reused by translateMeshesForEntity re-upload
 
@@ -3881,8 +3723,8 @@ export class Scene {
     if (!entry) return;
     entry.refs--;
     if (entry.refs <= 0) {
-      entry.texture.destroy();
       this.sharedTextures.delete(tm.sharedTextureKey);
+      entry.texture.destroy();
     }
   }
 
@@ -3945,6 +3787,7 @@ export class Scene {
    * is gone, so it is dropped like everything else here.
    */
   clearFlatGeometry(): void {
+    this.appearanceController?.forget();
     for (const mesh of this.meshes) destroyGpuResources(mesh);
     for (const batch of this.batchedMeshes) destroyGpuResources(batch);
     for (const tm of this.texturedMeshes) {

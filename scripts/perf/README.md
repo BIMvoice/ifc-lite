@@ -27,6 +27,25 @@ scripts/perf/flame.sh tests/models/ara3d/schependomlaan.ifc
 
 Fetch a fixture first if missing: `pnpm fixtures ara3d/schependomlaan.ifc`.
 
+## Canonical appearance provenance (#4243)
+
+Item-identified geometry now retains its canonical triangle-order identity at
+WASM extraction. A production-browser worker-load A/B against the same Rust
+runtime found a small median increase within the baseline run spread on the
+public AC20-FZK-Haus fixture; this is not an optimization or a speedup claim.
+All measured geometry/color/UV fingerprints and mesh/triangle counts matched.
+The additional metadata reuses existing index arrays, with no extra geometry
+buffer or transfer at extraction. Streaming fragments can retain an unsplit
+source index array; that memory lifetime still requires explicit downstream
+ownership and large-model qualification.
+
+The measurement boundary was completed metadata plus geometry worker output,
+with fresh Chromium processes and empty model caches. It did not measure
+renderer readiness: the stock combined viewer-readiness experiment encountered
+a baseline first-load viewport initialization race. Those failed samples were
+retained and excluded, not treated as successful loads. The lesson is to name
+and qualify the measured boundary before interpreting small load-time deltas.
+
 ## The native probe (`perf_probe`)
 
 `rust/processing/examples/perf_probe.rs`, wrapped by `probe.sh`. It drains the
@@ -931,3 +950,24 @@ Embedded-header preflight reads PNG dimensions directly and walks bounded JPEG
 markers through the STEP hex bytes. It neither copies the complete compressed
 image nor allocates pixels before the plan budget is checked; ordinary raster
 decoding remains unchanged.
+
+### Appearance preview ownership and batch restoration (#4243)
+
+A production-viewer API experiment on normally loaded FZK geometry found that
+isolating shared batches for reversible appearance previews left persistent
+partitions after cancellation. Exact geometry/bounds and GPU rectangle-picking
+results survived, but repeated broad edits would retain extra draw batches.
+Cohort-scoped restoration now stages a replacement only for descendants of the
+same original batch once all related drafts close. Committed textured owners
+remain separate; later Undo can rejoin their flat parts. The actual viewer
+returned to the original batch count and primary geometry GPU residency.
+
+This experiment measures synchronous Scene/Renderer preview phases, not IFC
+planning, image decoding, end-to-end Apply latency, or GPU completion. The fixture
+bounds the result to its eligible non-instanced owners; it does not qualify a
+large-model whole-scope workflow. Resource snapshots exclude pick/highlight
+caches and do not capture transient staging peaks. Restoration respects original
+allocation limits and keeps valid split batches with a reported warning if
+replacement allocation fails. The lesson is to check the post-cancel draw
+structure as well as geometry and picking: a correct image alone hid persistent
+batch fragmentation.
