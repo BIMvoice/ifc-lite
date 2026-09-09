@@ -10,10 +10,12 @@ export { WebGPUDevice } from './device.js';
 export type { AdapterInfoSnapshot } from './device.js';
 export { RenderPipeline } from './pipeline.js';
 export { Camera } from './camera.js';
-export { expandAppearanceCorners, equivalentAppearanceGeometry } from './appearance-uvs.js';
-import { resizeRendererViewport } from './renderer-viewport.js';
 // The MEASURED surface `getScene()` publishes — see its docs.
 export type { SceneContents } from './scene-contents.js';
+export { expandAppearanceCorners, equivalentAppearanceGeometry } from './appearance-uvs.js';
+export type { AppearancePreview, AppearanceOwner, AppearanceToken, AppearanceChange } from './appearance-preview.js';
+import type { AppearancePreview } from './appearance-preview.js';
+import { resizeRendererViewport } from './renderer-viewport.js';
 export type { ProjectionMode } from './camera-state.js';
 export type { InteractionMode } from './camera-controls.js';
 export { pickFitPolicy } from './camera-fit-policy.js';
@@ -3346,6 +3348,12 @@ export class Renderer {
      */
     resize(width: number, height: number): void {
         resizeRendererViewport(this.canvas, this.camera, width, height);
+    }
+
+    /** Owned, reversible appearance edits; model geometry remains unchanged. */
+    getAppearancePreview(): AppearancePreview {
+        if (!this.pipeline) throw new Error('Renderer must be initialized before previewing appearance');
+        return this.scene.appearancePreview(this.device.getDevice(), this.pipeline);
     }
 
     getCamera(): Camera {

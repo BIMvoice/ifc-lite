@@ -89,6 +89,39 @@ ownership of the input arrays and must treat shared geometry/provenance arrays
 as immutable. Expansion allocates one vertex per triangle corner and is an
 explicit authoring operation, outside ordinary model loading.
 
+## Reversible appearance previews
+
+After model streaming and GPU uploads finish, call
+`renderer.getAppearancePreview()` to obtain the scene's owned preview API.
+`begin({ expressId, modelIndex })` claims one renderer entity and returns a
+token. Resolve federation IDs before calling it. The model index is checked
+against every part so another model cannot be edited through the token.
+
+`update(token, parts)` takes every original mesh part in order. It preserves
+exact triangle positions/normals and ownership; corner expansion through
+`expandAppearanceCorners` may represent the same triangles with UV seams.
+New bitmap content requires a new texture identity. Input geometry, image and
+UV arrays are borrowed immutable data. Textured and ordinary untextured parts
+are supported, including owners sharing a flat GPU batch. Instanced geometry,
+per-vertex mixed-owner data, released CPU geometry and unfinished uploads are
+explicitly rejected.
+
+Replacement GPU resources are staged before replacing the current preview.
+Original resources remain owned by the token until `cancel(token)` restores
+them or `commit(token)` keeps the result and releases the originals. A cancelled
+or scene-invalidated issued token can be cancelled again safely; updates and
+commits with stale/foreign tokens fail. Model removal and scene teardown release
+hidden originals as well as active previews.
+
+For a multi-object command, `prepareCommit(tokens)` validates the entire group
+and returns an idempotent commit function. Changing any prepared draft fences
+that commit before it consumes an owner. The caller must coordinate this with
+its IFC/entity transaction and image leases; the renderer does not publish IFC
+changes or manage application history. Returned `AppearanceChange` records hold
+frozen CPU mesh wrappers for before/after history, never GPU handles. Retain
+the images and arrays as long as history needs them, and request a render after
+the application publishes the completed command.
+
 ## Camera Controls
 
 ### Configuration
@@ -1013,6 +1046,12 @@ async function createViewer() {
 - [2D Drawing Guide](drawing-2d.md) - Generate 2D plans and elevations
 - [API Reference](../api/typescript.md) - Complete API docs
 
+Preview cancellation rejoins only partitions of the same original flat batch,
+after every related draft closes. Committed textured owners remain separate;
+undoing them can rejoin their original cohort. Restoration respects original
+vertex/index allocation bounds and current colors. If replacement allocation
+fails, split batches remain drawable and the renderer reports a warning.
+Cohort metadata is cleared when its entities or scene are removed.
 
 ## Model workspace translations
 

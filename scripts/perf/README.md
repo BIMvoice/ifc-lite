@@ -930,6 +930,27 @@ distributions directly to the TypeScript entrypoint and retain their provenance.
 current-commit build. The wrapper retains the temporary base through child exit
 and then removes it while preserving the child failure status.
 
+
+### Appearance preview ownership and batch restoration (#4243)
+
+A production-viewer API experiment on normally loaded FZK geometry found that
+isolating shared batches for reversible appearance previews left persistent
+partitions after cancellation. Exact geometry/bounds and GPU rectangle-picking
+results survived, but repeated broad edits would retain extra draw batches.
+Cohort-scoped restoration now stages a replacement only for descendants of the
+same original batch once all related drafts close. Committed textured owners
+remain separate; later Undo can rejoin their flat parts. The actual viewer
+returned to the original batch count and primary geometry GPU residency.
+
+This experiment measures synchronous Scene/Renderer preview phases, not IFC
+planning, image decoding, end-to-end Apply latency, or GPU completion. The fixture
+bounds the result to its eligible non-instanced owners; it does not qualify a
+large-model whole-scope workflow. Resource snapshots exclude pick/highlight
+caches and do not capture transient staging peaks. Restoration respects original
+allocation limits and keeps valid split batches with a reported warning if
+replacement allocation fails. The lesson is to check the post-cancel draw
+structure as well as geometry and picking: a correct image alone hid persistent
+batch fragmentation.
 ### Opt-in appearance planning (#4243)
 
 Appearance planning invokes canonical mesh production for the source and planned
