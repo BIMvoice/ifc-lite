@@ -1,0 +1,115 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { createAppearancePlanner, type AppearanceWorker } from './planner-worker-client.js';
+import type { AppearancePlan, AppearanceRequest, AppearanceWorkerRequest, AppearanceWorkerResponse } from './planner-types.js';
+const request: AppearanceRequest = {
+  schema: 'IFC4', sourceRevision: 'first', nextExpressId: 100, productIds: [10],
+  imageUri: 'image.png', repeatS: true, repeatT: true,
+  mapping: { kind: 'existingUv', scale: [1, 1], offset: [0, 0], rotationRadians: 0 },
+};
+const plan = (revision = 'first'): AppearancePlan => ({ sourceRevision: revision, nextExpressId: 100,
+  nextAvailableExpressId: 100, created: [], edits: [], removed: [], items: [], exclusions: [] });
+class FakeWorker implements AppearanceWorker {
+  onmessage: AppearanceWorker['onmessage'] = null;
+  onerror: AppearanceWorker['onerror'] = null;
+  onmessageerror: AppearanceWorker['onmessageerror'] = null;
+  terminated = 0;
+  posted: AppearanceWorkerRequest | undefined;
+  postMessage(message: AppearanceWorkerRequest) {
+    assert.equal(arguments.length, 1, 'live source must never be passed in a transfer list');
+    this.posted = structuredClone(message);
+  }
+  terminate() { this.terminated++; }
+  emit(message: AppearanceWorkerResponse) { this.onmessage?.({ data: message } as MessageEvent<AppearanceWorkerResponse>); }
+  complete(result = plan()) { this.emit({ type: 'complete', id: this.posted!.id, plan: result }); }
+}
+function setup(timeoutMs = 120_000) {
+  const workers: FakeWorker[] = [];
+  const client = createAppearancePlanner({ timeoutMs, workerFactory: () => {
+    const worker = new FakeWorker(); workers.push(worker); return worker;
+  } });
+  return { workers, client };
+}
+describe('appearance worker ownership (#4243)', () => {
+  it('rejects an oversized source before spawning a worker or cloning its bytes', async () => {
+    const { client, workers } = setup();
+    const source = new Uint8Array(128 * 1024 * 1024 + 1);
+    await assert.rejects(client.plan(source, request), /exceeds 128 MiB/);
+    assert.equal(workers.length, 0);
+    assert.equal(source.byteLength, 128 * 1024 * 1024 + 1);
+    client.dispose();
+  });
+  it('preserves source storage and clears handlers/worker on success', async () => {
+    const { client, workers } = setup();
+    const source = new Uint8Array([1, 2, 3]);
+    const pending = client.plan(source, request);
+    assert.deepEqual(workers[0].posted?.source, source);
+    assert.notStrictEqual(workers[0].posted?.source.buffer, source.buffer);
+    workers[0].complete(); await pending;
+    assert.deepEqual([...source], [1, 2, 3]);
+    assert.equal(workers[0].terminated, 1); assert.equal(workers[0].onmessage, null);
+    client.dispose(); assert.equal(workers[0].terminated, 1);
+  });
+  it('a newer job rejects the previous one and ignores already-queued stale callbacks', async () => {
+    const { client, workers } = setup();
+    const first = client.plan(new Uint8Array(1), request);
+    const rejected = assert.rejects(first, { name: 'AbortError' });
+    const staleCallback = workers[0].onmessage!;
+    const next = client.plan(new Uint8Array(1), { ...request, sourceRevision: 'second' });
+    await rejected;
+    staleCallback({ data: { type: 'complete', id: 1, plan: plan() } } as MessageEvent<AppearanceWorkerResponse>);
+    assert.equal(workers[0].terminated, 1); assert.equal(workers[1].terminated, 0);
+    workers[1].emit({ type: 'complete', id: 1, plan: plan() });
+    assert.equal(workers[1].terminated, 0, 'wrong job id cannot settle the active worker');
+    workers[1].complete(plan('second')); await next;
+    assert.equal(workers[1].terminated, 1);
+  });
+  it('aborted/disposed clients spawn no worker and cancellation releases an active worker', async () => {
+    const { client, workers } = setup();
+    const signal = AbortSignal.abort();
+    await assert.rejects(client.plan(new Uint8Array(), request, { signal }), { name: 'AbortError' });
+    assert.equal(workers.length, 0);
+    const controller = new AbortController();
+    const pending = client.plan(new Uint8Array(), request, { signal: controller.signal });
+    const rejected = assert.rejects(pending, { name: 'AbortError' });
+    controller.abort(); await rejected; assert.equal(workers[0].terminated, 1);
+    client.dispose(); await assert.rejects(client.plan(new Uint8Array(), request), /disposed/);
+    assert.equal(workers.length, 1);
+  });
+  it('rejects factory/postMessage failures without retaining worker ownership', async () => {
+    const broken = createAppearancePlanner({ workerFactory: () => { throw new Error('CSP blocked'); } });
+    await assert.rejects(broken.plan(new Uint8Array(), request), /CSP blocked/);
+    const worker = new FakeWorker(); worker.postMessage = () => { throw new Error('clone failed'); };
+    const client = createAppearancePlanner({ workerFactory: () => worker });
+    await assert.rejects(client.plan(new Uint8Array(), request), /clone failed/);
+    assert.equal(worker.terminated, 1); assert.equal(worker.onerror, null); client.dispose();
+    assert.equal(worker.terminated, 1);
+  });
+  it('terminates on timeout, crashes, unreadable messages, and mismatched model revisions', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const { client, workers } = setup(100);
+    const timeout = client.plan(new Uint8Array(), request);
+    const timedOut = assert.rejects(timeout, /stopped responding/);
+    t.mock.timers.tick(100); await timedOut;
+    const crash = client.plan(new Uint8Array(), request);
+    workers[1].onerror?.({ message: 'worker crashed' } as ErrorEvent);
+    await assert.rejects(crash, /worker crashed/);
+    const unreadable = client.plan(new Uint8Array(), request);
+    workers[2].onmessageerror?.({} as MessageEvent);
+    await assert.rejects(unreadable, /unreadable/);
+    const mismatch = client.plan(new Uint8Array(), request); workers[3].complete(plan('wrong'));
+    await assert.rejects(mismatch, /stale model/);
+    assert.ok(workers.every(worker => worker.terminated === 1));
+    t.mock.timers.tick(500); assert.ok(workers.every(worker => worker.terminated === 1));
+  });
+  it('propagates canonical eligibility errors and releases the worker', async () => {
+    const { client, workers } = setup();
+    const pending = client.plan(new Uint8Array(), request);
+    workers[0].emit({ type: 'error', id: workers[0].posted!.id, message: 'Invalid appearance mapping parameters' });
+    await assert.rejects(pending, /Invalid appearance mapping/);
+    assert.equal(workers[0].terminated, 1);
+  });
+});
