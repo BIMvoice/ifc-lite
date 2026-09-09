@@ -39,6 +39,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
         mesh.indices,
         uvs,
         mesh.indices,
+        new Float32Array(27),
       );
       assert.ok(equivalentAppearanceGeometry(fragment, expanded));
       assert.ok(
@@ -59,6 +60,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
       mesh.indices,
       uvs,
       mesh.indices,
+      new Float32Array(27),
     );
     assert.equal(
       expanded.positions.length / 3,
@@ -80,6 +82,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
       mesh.indices,
       new Float32Array(18),
       target,
+      new Float32Array(27),
     );
     assert.strictEqual(first.appearanceSource!.sourceIndices, target);
     const second = expandAppearanceCorners(
@@ -87,6 +90,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
       target,
       new Float32Array(18).fill(0.25),
       mesh.indices,
+      new Float32Array(27),
     );
     assert.ok(equivalentAppearanceGeometry(first, second));
     assert.ok(equivalentAppearanceGeometry(second, mesh));
@@ -98,9 +102,32 @@ describe('canonical appearance corner provenance (#4243)', () => {
           mesh.indices,
           new Float32Array(18),
           target,
+          new Float32Array(27),
         ),
       /topology changed/,
     );
+  });
+  it('installs exact canonical corner normals while keeping history validation strict', () => {
+    const mesh = sourceMesh();
+    const targetNormals = Float32Array.from({ length: 27 }, (_, i) => i / 1000);
+    const fragments = splitMeshForStreaming(mesh, 3, 4096);
+    for (const fragment of fragments) {
+      const expanded = expandAppearanceCorners(fragment, mesh.indices,
+        new Float32Array(18), mesh.indices, targetNormals);
+      assert.equal(equivalentAppearanceGeometry(fragment, expanded), false);
+      assert.ok(equivalentAppearanceGeometry(fragment, expanded, { allowNormalChanges: true }));
+      for (let i = 0; i < expanded.indices.length; i++) {
+        const corner = fragment.appearanceSource!.cornerIndices![i];
+        assert.deepEqual(expanded.normals.slice(i * 3, i * 3 + 3),
+          targetNormals.slice(corner * 3, corner * 3 + 3));
+      }
+      expanded.positions[0] += 1;
+      assert.equal(equivalentAppearanceGeometry(fragment, expanded, { allowNormalChanges: true }), false);
+    }
+    for (const invalid of [new Float32Array(3), new Float32Array(27).fill(Infinity)]) {
+      assert.throws(() => expandAppearanceCorners(mesh, mesh.indices,
+        new Float32Array(18), mesh.indices, invalid), /provenance|finite/);
+    }
   });
   it('rejects equal-size rebuilt topology, even after another streaming split', () => {
     const mesh = sourceMesh(),
@@ -112,6 +139,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           mesh.indices,
           new Float32Array(18),
           mesh.indices,
+          new Float32Array(27),
         ),
       /provenance/,
     );
@@ -123,6 +151,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
             mesh.indices,
             new Float32Array(18),
             mesh.indices,
+            new Float32Array(27),
           ),
         /provenance/,
       );
@@ -136,6 +165,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           altered,
           new Float32Array(18),
           mesh.indices,
+          new Float32Array(27),
         ),
       /topology changed/,
     );
@@ -150,6 +180,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
         mesh.indices,
         new Float32Array(18),
         mesh.indices,
+        new Float32Array(27),
       ).uvs!.length,
       18,
     );
@@ -160,6 +191,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           mesh.indices,
           new Float32Array(6),
           mesh.indices,
+          new Float32Array(27),
         ),
       /provenance/,
     );
@@ -170,6 +202,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           mesh.indices,
           new Float32Array(18).fill(Infinity),
           mesh.indices,
+          new Float32Array(27),
         ),
       /finite/,
     );
@@ -181,6 +214,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           mesh.indices,
           new Float32Array(18),
           mesh.indices,
+          new Float32Array(27),
         ),
       /out of range/,
     );
