@@ -35,10 +35,14 @@ function setup(timeoutMs = 120_000) {
 }
 describe('appearance worker ownership (#4243)', () => {
   it('rejects an oversized source before spawning a worker or cloning its bytes', async () => {
-    const { client, workers } = setup();
+    let attempted = 0;
+    const client = createAppearancePlanner({ workerFactory: () => {
+      attempted++;
+      throw new Error('Oversized source reached the worker boundary');
+    } });
     const source = new Uint8Array(128 * 1024 * 1024 + 1);
     await assert.rejects(client.plan(source, request), /exceeds 128 MiB/);
-    assert.equal(workers.length, 0);
+    assert.equal(attempted, 0);
     assert.equal(source.byteLength, 128 * 1024 * 1024 + 1);
     client.dispose();
   });

@@ -79,6 +79,11 @@ UTF-8 `AppearancePlan` JSON bytes and never mutates the source. Run this
 synchronous operation in a dedicated worker; terminate that worker to cancel.
 Free the `IfcAPI` handle in `finally` when the job ends.
 
+The browser client rejects source snapshots above 128 MiB before copying them to
+the worker. The binding limits request JSON to 256 KiB and serialized results to
+64 MiB; the Rust planner separately bounds aggregate geometry and texture work.
+Budget errors require a smaller source or scope and do not return a partial edit.
+
 The request supplies `schema` (`IFC4` or `IFC4X3`), `sourceRevision`, the reserved
 `nextExpressId` allocator watermark, `productIds`, a safe relative `imageUri`,
 `repeatS`, `repeatT`, and `mapping`. Mapping accepts `existingUv` with scale,
