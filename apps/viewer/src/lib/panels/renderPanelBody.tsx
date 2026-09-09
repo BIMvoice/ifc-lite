@@ -39,6 +39,8 @@ const SourcesPanel = lazy(() =>
   import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })),
 );
 
+const AppearancePanel = lazy(() => import('@/components/viewer/appearance/AppearancePanel').then(m => ({ default: m.AppearancePanel })));
+
 /**
  * Render the body for a workspace panel. `onClose` is the host's "close this
  * panel" handler (re-dock to Information, remove the float, or re-dock the
@@ -48,6 +50,7 @@ export function renderPanelBody(id: WorkspacePanelId, onClose: () => void): Reac
   switch (id) {
     // Hierarchy's home is the left slot (#1267); it is never routed to the right
     // pane / float / pop-out, but the case keeps the id to body map exhaustive.
+    case 'appearance': return <ChunkErrorBoundary label="Appearance panel"><Suspense fallback={null}><AppearancePanel /></Suspense></ChunkErrorBoundary>;
     case 'hierarchy': return <HierarchyPanel />;
     case 'properties': return <PropertiesPanel />;
     case 'compare': return <ComparePanel onClose={onClose} />;

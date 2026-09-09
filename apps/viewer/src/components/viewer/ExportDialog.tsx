@@ -1,13 +1,16 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import { stepExportProgress } from '@/lib/export/step-progress.js';
+import { prepareAppearanceSerialization } from '@/lib/appearance/serialization.js';
 import { packagePortableIfcAsync, assertPortableMergeSupported } from '@/lib/export/portable-ifc';
+import { modelAppearanceAssets } from '@/lib/appearance/model-assets';
 
 /**
  * Export Dialog for IFC export with property mutations
  *
  * Schema drives the output format automatically:
- * - IFC2X3 / IFC4 / IFC4X3 → .ifc (STEP)
+ * - IFC2X3 / IFC4 / IFC4X3 → .ifc (STEP), or .ifczip with image resources
  * - IFC5 → .ifcx (JSON + USD geometry)
  *
  * "Changes Only" exports just mutations:
@@ -56,7 +59,7 @@ import { useOptionalExtensionHost } from '@/sdk/ExtensionHostProvider';
 import { configureMutationView } from '@/utils/configureMutationView';
 import { toast } from '@/components/ui/toast';
 import { ensureModelExportReady } from '@/services/desktop-export';
-import { StepExporter, MergedExporter, Ifc5Exporter, IFC5_KNOWN_PROP_NAMES, type MergeModelInput, type ExportProgress, type StepExportProgress } from '@ifc-lite/export';
+import { StepExporter, MergedExporter, Ifc5Exporter, IFC5_KNOWN_PROP_NAMES, type MergeModelInput, type ExportProgress } from '@ifc-lite/export';
 import { withInstancedMeshes } from '../../utils/instancedExport.js';
 import { MutablePropertyView } from '@ifc-lite/mutations';
 import type { IfcDataStore } from '@ifc-lite/parser';
@@ -316,8 +319,6 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
     return localIds.size > 0 ? localIds : null;
   }, [models, isolatedEntities, isolatedEntitiesByModel]);
 
-  // Detect if the model has properties that would be filtered by onlyKnownProperties.
-  // Only relevant for IFC5 exports — show the toggle only when there's something to filter.
   const hasFilterableProperties = useMemo(() => {
     if (!isIfc5 || !selectedModel?.ifcDataStore) return false;
     const mutationView = getMutationView(selectedModelId);
@@ -339,7 +340,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
     return false;
   }, [isIfc5, selectedModel, selectedModelId, getMutationView]);
 
-  // Compute output format description for UI
+  const packagesImages = exportScope === 'single' && modelAppearanceAssets.hasResources(selectedModelId);
   const outputInfo = useMemo(() => {
     if (changesOnly) {
       return isIfc5
@@ -348,8 +349,9 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
     }
     return isIfc5
       ? { ext: '.ifcx', label: 'IFCX (JSON + USD geometry)' }
+      : packagesImages ? { ext: '.ifczip', label: 'IFC + images' }
       : { ext: '.ifc', label: 'IFC (STEP)' };
-  }, [isIfc5, changesOnly]);
+  }, [isIfc5, changesOnly, packagesImages]);
 
   const handleExport = useCallback(async () => {
     if (!schema) return;
@@ -549,7 +551,8 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
           throw new Error('Model data is unavailable for export');
         }
 
-        const exporter = new StepExporter(exportDataStore, mutationView || undefined);
+        const serialized = prepareAppearanceSerialization(selectedModelId, exportDataStore, applyMutations ? mutationView || undefined : undefined);
+        const exporter = new StepExporter(exportDataStore, serialized.view);
 
         const localHidden = visibleOnly ? getLocalHiddenIds(selectedModelId) : undefined;
         const localIsolated = visibleOnly ? getLocalIsolatedIds(selectedModelId) : undefined;
@@ -569,14 +572,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
           georefMutations,
           description: `Exported from ifc-lite with ${modifiedCount} modifications`,
           application: 'ifc-lite',
-          onProgress: (p: StepExportProgress) => setExportProgress({
-            phase: p.phase === 'preparing' ? 'Preparing export...'
-              : p.phase === 'entities' ? 'Processing entities...'
-              : 'Assembling file...',
-            percent: p.percent,
-            entitiesProcessed: p.entitiesProcessed,
-            entitiesTotal: p.entitiesTotal,
-          }),
+          onProgress: p => setExportProgress(stepExportProgress(p)),
         });
 
         setExportProgress(null);
@@ -590,7 +586,7 @@ export function ExportDialog({ trigger }: ExportDialogProps) {
         });
 
         const suffix = visibleOnly ? '_visible' : '_export';
-        const artifact = await packagePortableIfcAsync(selectedModelId, spliced.content);
+        const artifact = await packagePortableIfcAsync(selectedModelId, spliced.content, serialized.resources);
         downloadFile(artifact.content, `${baseName}${suffix}.${artifact.ext}`, artifact.mime);
 
         const stepMsg = `Exported ${result.stats.entityCount} entities (${result.stats.modifiedEntityCount} modified)`;
