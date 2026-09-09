@@ -1014,6 +1014,9 @@ importers:
       '@ifc-lite/geometry':
         specifier: workspace:^
         version: link:../geometry
+      '@ifc-lite/ifcx':
+        specifier: workspace:^
+        version: link:../ifcx
       '@ifc-lite/mutations':
         specifier: workspace:^
         version: link:../mutations
@@ -1030,9 +1033,6 @@ importers:
         specifier: ^0.7.2
         version: 0.7.2
     devDependencies:
-      '@ifc-lite/ifcx':
-        specifier: workspace:^
-        version: link:../ifcx
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

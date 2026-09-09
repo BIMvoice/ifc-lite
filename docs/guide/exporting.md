@@ -789,3 +789,33 @@ await saveFile('entities.csv', csv);
 
 - [Query Guide](querying.md) - Filter data before export
 - [API Reference](../api/typescript.md) - Complete API docs
+
+### IFCX texture portability
+
+`Ifc5Exporter` preserves textured mesh fragments using the declared, versioned
+`ifclite::appearance::v1` and `ifclite::image::v1` extension. Each fragment remains
+an ordinary `usd::usdgeom::mesh` child of its original IFC owner. The extension
+carries per-vertex UVs, sampler repeats, and shared top-down straight-alpha RGBA8
+pixels. It does not change geometry, evaluate IFC materials, or generate UVs.
+
+This is an IFClite extension, not an official OpenUSD material binding. The
+[current buildingSMART USD schema](https://github.com/buildingSMART/ifcx.dev/blob/main/%40openusd.org/usd%40v1.ifcx)
+defines mesh points and face indices but no texture binding. Readers that ignore
+the extension retain standard geometry and fragment colors; they do not recover
+textures. Native Rust IFCX export currently exports structural data without
+geometry and is outside this mesh-transport path.
+
+The synchronous exporter accepts decoded `MeshData.texture` pixels in headless
+applications. Browser `textureBitmap` inputs are read through `OffscreenCanvas`;
+unresolved images or invalid UVs raise an actionable error. Optional
+`textureSources` maps exact `MeshTextureRef.url` values to `{ mimeType, bytes }`
+for original PNG/JPEG assets. Originals are preserved without recompression,
+separately from the decoded pixels needed for rendering; decoded IFCX originals
+survive subsequent IFCX exports. The caller must supply available originals;
+the exporter does not fetch external URLs. Images are deduplicated by content
+and dimensions. The file budget is 512 MiB of unique pixel/resource bytes, with
+16,384 pixels per dimension and 64 MiB per optional encoded original.
+
+The current RGBA wire favors exact, wasm-free roundtrips over compressed file
+size. It can make IFCX substantially larger than IFCZIP. Original source images
+are archival alongside pixels, rather than a second mandatory decoder pipeline.
