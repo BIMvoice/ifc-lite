@@ -42,6 +42,8 @@ export interface AppearancePlan extends AppearanceEntityPlan {
     targetIndices: number[];
     /** UV pairs in canonical triangle-corner order, before fragment remapping. */
     previewCornerUvs: number[];
+    /** Canonical target shading normals in renderer Y-up triangle-corner order. */
+    targetCornerNormals: number[];
   }>;
   exclusions: Array<{ productId: number; reason: string }>;
 }
