@@ -294,6 +294,29 @@ editor.removeEntity(unwantedExpressId);
 
 Edits accumulate in the same overlay used by `setProperty` / `setAttribute`. They land in the exported file the next time you call `exportToStep(store, { applyMutations: true })` from `@ifc-lite/export`.
 
+### Atomic overlay edits
+
+Use `StoreEditor.runAtomic` to create or modify a related set of IFC entities together. The callback receives a detached editor; a thrown error leaves the live overlay, mutation history and express-ID allocator unchanged. `MutablePropertyView.runAtomic` provides the same operation with a draft view for property and quantity edits.
+
+```typescript
+import { MutablePropertyView, StoreEditor } from '@ifc-lite/mutations';
+
+const view = new MutablePropertyView(propertyTable, modelId);
+const editor = new StoreEditor(dataStore, view);
+const colour = editor.runAtomic(draft => {
+  const entity = draft.addEntity('IfcColourRgb', [null, 0.2, 0.4, 0.8]);
+  if (!draft.hasEntity(entity.expressId)) throw new Error('Missing created colour');
+  return entity;
+});
+console.log(editor.hasEntity(colour.expressId)); // true after publication
+```
+
+`hasEntity` recognizes live source, deferred-index and newly created entities, and rejects removed entities and invalid IDs. Atomic callbacks must be synchronous: prepare images, network requests and other asynchronous resources beforehand. Source tables and extractors remain shared read-only. Escaped draft editors and nested values cannot modify the published overlay. Reentering the original view is detected and preserves that independent edit rather than overwriting it.
+
+For commands coordinating IFC with another synchronous subsystem, `view.prepareAtomic(callback)` returns `{ result, validate, commit, rollback }`. Preparation runs the callback without publishing. Validate all external resources before calling `commit`; it rejects intervening overlay edits, including edits that skip history. Repeated successful commits are harmless and never replay an old snapshot over newer edits. After a successful commit, `rollback` restores the original overlay, history and allocator only if no subsequent edit occurred; otherwise it throws and preserves those newer edits. Repeated rollback is harmless, and a rolled-back transaction cannot be committed again. Rollback before commit is a no-op.
+
+These transactions publish IFC overlay state only. They do not group application undo stacks or roll back renderer, file or network effects. The caller must coordinate those effects and handle rollback refusal explicitly. Preparation copies the existing overlay and checks it for changes, so batch related edits in one transaction rather than opening a transaction for every entity.
+
 #### STEP value conventions
 
 `addEntity` and `setPositionalAttribute` accept the same value shape that `EntityExtractor.extractEntity().attributes` produces — keeping the read/write round-trip predictable:

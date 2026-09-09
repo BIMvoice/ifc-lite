@@ -320,6 +320,12 @@ export class IfcAPI {
      */
     calibrateAppearancePlane(request_json: string): Uint8Array;
     /**
+     * Catalog effective IfcProduct classes and IfcRelDefinesByType membership.
+     * JSON input is AppearanceCatalogRequest; output is AppearanceCatalog JSON.
+     * Run in a worker and validate sourceRevision before using the selectors.
+     */
+    catalogAppearance(content: Uint8Array, request_json: string): Uint8Array;
+    /**
      * Clear the cached entity index (call between loads when reusing
      * the same `IfcAPI` instance — e.g. the parser worker keeps one
      * `IfcAPI` alive across multiple `parse` requests).
@@ -2012,6 +2018,7 @@ export interface InitOutput {
     readonly ifcapi_buildPrePassStreamingShardedWithSourceFingerprint: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number) => void;
     readonly ifcapi_buildPrePassStreamingWithSourceFingerprint: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly ifcapi_calibrateAppearancePlane: (a: number, b: number, c: number, d: number) => void;
+    readonly ifcapi_catalogAppearance: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly ifcapi_clearPrePassCache: (a: number) => void;
     readonly ifcapi_diagnoseGeometry: (a: number, b: number, c: number) => number;
     readonly ifcapi_exportCsv: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
