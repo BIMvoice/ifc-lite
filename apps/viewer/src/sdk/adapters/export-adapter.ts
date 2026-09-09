@@ -84,21 +84,23 @@ function normalizeRefs(raw: unknown[]): EntityRef[] {
 }
 
 /**
- * Resolve `sdk.export.ifc()` visibility filters. A subset `refs` (< model
- * entity count) means the caller named exactly what they want: isolate to
- * `selectedExpressIds`, skip every visibility channel. A full-model `refs`
- * means "visible only" per the current viewer state, so this routes through
- * `resolveExportVisibility()` — the same resolver ExportDialog/
- * GLBExportDialog use — so `classFilter`/`selectedStoreys`/`typeVisibility`
- * are honored here too (previously only `hiddenEntitiesByModel`/
- * `isolatedEntitiesByModel` were read — this surface reproduced #4328). */
+ * Resolve `sdk.export.ifc()` visibility filters. "Full model" is coverage,
+ * not size: `selectedExpressIds` is the whole model only when it has
+ * `entityCount` members AND `hasEntity` confirms every one exists --
+ * cardinality alone let `entityCount` nonexistent ids pass as "full" and
+ * silently export the whole model (reproduced live). Anything short of a
+ * verified cover isolates to `selectedExpressIds`. A verified full-model
+ * `refs` routes through `resolveExportVisibility()` -- the same resolver
+ * ExportDialog/GLBExportDialog use -- so `classFilter`/`selectedStoreys`/
+ * `typeVisibility` are honored here too (#4328). */
 export function resolveVisibilityFilterSets(
   state: StoreApi['getState'] extends () => infer T ? T : never,
   modelId: string,
   selectedExpressIds: Set<number>,
   entityCount: number,
+  hasEntity: (expressId: number) => boolean,
 ): { visibleOnly: boolean; hiddenEntityIds: Set<number>; isolatedEntityIds: Set<number> | null } {
-  if (selectedExpressIds.size < entityCount) {
+  if (selectedExpressIds.size !== entityCount || ![...selectedExpressIds].every(hasEntity)) {
     return { visibleOnly: true, hiddenEntityIds: new Set<number>(), isolatedEntityIds: selectedExpressIds };
   }
 
@@ -335,18 +337,16 @@ export function createExportAdapter(store: StoreApi): ExportBackendMethods {
       if (!model?.ifcDataStore) {
         throw new Error(`export.ifc: model '${modelId}' is not loaded`);
       }
-
-      if (model.ifcDataStore.schemaVersion === 'IFC5') {
+      const dataStore = model.ifcDataStore;
+      if (dataStore.schemaVersion === 'IFC5') {
         throw new Error('export.ifc: IFC5 export is not supported by STEP exporter, use IFC2X3/IFC4/IFC4X3 models');
       }
 
       const options = candidateOptions;
       const selectedExpressIds = new Set(refs.map(ref => ref.expressId));
       const visibilityFilters = resolveVisibilityFilterSets(
-        state,
-        modelId,
-        selectedExpressIds,
-        model.ifcDataStore.entityCount,
+        state, modelId, selectedExpressIds, dataStore.entityCount,
+        (expressId) => dataStore.entityIndex.byId.has(expressId),
       );
       const visibleOnly = options.visibleOnly === true || visibilityFilters.visibleOnly;
       const hiddenEntityIds = visibleOnly ? visibilityFilters.hiddenEntityIds : new Set<number>();

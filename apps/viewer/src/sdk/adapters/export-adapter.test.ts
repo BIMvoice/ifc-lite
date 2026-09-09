@@ -23,7 +23,13 @@ test('resolveVisibilityFilterSets honors legacy single-model hidden and isolated
     classFilter: null,
   });
 
-  const result = resolveVisibilityFilterSets(useViewerStore.getState(), LEGACY_MODEL_ID, new Set([1, 2, 3]), 3);
+  const result = resolveVisibilityFilterSets(
+    useViewerStore.getState(),
+    LEGACY_MODEL_ID,
+    new Set([1, 2, 3]),
+    3,
+    (expressId) => [1, 2, 3].includes(expressId),
+  );
 
   assert.equal(result.visibleOnly, false);
   assert.deepEqual([...result.hiddenEntityIds].sort(), [11, 12]);
@@ -714,5 +720,113 @@ describe('sdk.export.ifc() must honor classFilter when refs cover the whole mode
     const out = decodeIfcOutput(adapter.ifc(doorRef, {}));
 
     assert.ok(out.includes('IFCDOOR'), 'explicitly-requested door must be exported despite the class filter');
+  });
+});
+
+// ─── resolveVisibilityFilterSets: "full model" is coverage, not cardinality
+// ───────────────────────────────────────────────────────────────────────
+//
+// The bare `selectedExpressIds.size < entityCount` check that predates this
+// PR classifies ANY refs set that isn't smaller than the model as "full
+// model" — including one made entirely of ids that don't exist in the
+// model, which satisfies "not smaller" while covering none of the model.
+// That silently routed into `resolveExportVisibility()` and dumped the
+// whole model regardless of what the caller named (reproduced live:
+// nonexistent ids against a 4-entity model produced a full export).
+// Membership (`hasEntity`) is now required alongside cardinality before a
+// refs set counts as "full model".
+
+describe('resolveVisibilityFilterSets: full-model classification requires membership, not just cardinality', () => {
+  it('refs == entityCount but none of the ids exist -> isolates (not full model)', () => {
+    const hasEntity = (id: number) => [1, 2, 3, 4].includes(id);
+    const result = resolveVisibilityFilterSets(
+      useViewerStore.getState(),
+      LEGACY_MODEL_ID,
+      new Set([901, 902, 903, 904]), // 4 bogus ids, entityCount is 4
+      4,
+      hasEntity,
+    );
+    assert.equal(result.visibleOnly, true, 'must NOT be classified as full model');
+    assert.deepEqual([...(result.isolatedEntityIds ?? [])].sort(), [901, 902, 903, 904]);
+  });
+
+  it('refs == entityCount, mixed real + nonexistent ids -> isolates to exactly the named refs', () => {
+    const hasEntity = (id: number) => [1, 2, 3, 4].includes(id);
+    const result = resolveVisibilityFilterSets(
+      useViewerStore.getState(),
+      LEGACY_MODEL_ID,
+      new Set([1, 2, 3, 999]), // 3 real + 1 bogus, entityCount is 4
+      4,
+      hasEntity,
+    );
+    assert.equal(result.visibleOnly, true, 'a set with even one non-member id is not a full-model cover');
+    assert.deepEqual([...(result.isolatedEntityIds ?? [])].sort(), [1, 2, 3, 999]);
+  });
+
+  it('refs.size > entityCount (bogus ids) -> isolates (the predating `size < entityCount` check fell through to "full" here too — also fixed)', () => {
+    const hasEntity = (id: number) => [1, 2, 3, 4].includes(id);
+    const result = resolveVisibilityFilterSets(
+      useViewerStore.getState(),
+      LEGACY_MODEL_ID,
+      new Set([901, 902, 903, 904, 905]),
+      4,
+      hasEntity,
+    );
+    assert.equal(result.visibleOnly, true);
+    assert.deepEqual([...(result.isolatedEntityIds ?? [])].sort(), [901, 902, 903, 904, 905]);
+  });
+
+  it('refs a true subset of real ids -> isolates to exactly those refs', () => {
+    const hasEntity = (id: number) => [1, 2, 3, 4].includes(id);
+    const result = resolveVisibilityFilterSets(
+      useViewerStore.getState(),
+      LEGACY_MODEL_ID,
+      new Set([3]),
+      4,
+      hasEntity,
+    );
+    assert.equal(result.visibleOnly, true);
+    assert.deepEqual([...(result.isolatedEntityIds ?? [])], [3]);
+  });
+
+  it('refs exactly the real full set -> routes through resolveExportVisibility (genuine full model)', () => {
+    useViewerStore.getState().resetViewerState();
+    useViewerStore.setState({
+      models: new Map(),
+      hiddenEntities: new Set([2]),
+      isolatedEntities: null,
+      hiddenEntitiesByModel: new Map(),
+      isolatedEntitiesByModel: new Map(),
+      classFilter: null,
+    });
+    const hasEntity = (id: number) => [1, 2, 3, 4].includes(id);
+    const result = resolveVisibilityFilterSets(
+      useViewerStore.getState(),
+      LEGACY_MODEL_ID,
+      new Set([1, 2, 3, 4]),
+      4,
+      hasEntity,
+    );
+    assert.equal(result.visibleOnly, false, 'a verified full-model cover must route through resolveExportVisibility');
+    assert.deepEqual([...result.hiddenEntityIds].sort(), [2]);
+  });
+
+  it('sdk.export.ifc(): nonexistent ids sized to entityCount must NOT dump the full model (#4333 defect)', () => {
+    const dataStore = buildFourEntityStore();
+    useViewerStore.getState().resetViewerState();
+    useViewerStore.setState({
+      models: new Map(),
+      ifcDataStore: dataStore,
+      hiddenEntities: new Set(),
+      isolatedEntities: null,
+      classFilter: null,
+    });
+
+    const adapter = createExportAdapter(useViewerStore as unknown as StoreApi);
+    const bogusRefs = [901, 902, 903, 904].map((expressId) => ({ modelId: LEGACY_MODEL_ID, expressId }));
+    const out = decodeIfcOutput(adapter.ifc(bogusRefs, { visibleOnly: true }));
+
+    assert.ok(!out.includes('IFCDOOR'), 'door must not appear: it was never named and refs do not cover the model');
+    assert.ok(!out.includes('IFCWALLSTANDARDCASE'), 'wall must not appear: it was never named and refs do not cover the model');
   });
 });
