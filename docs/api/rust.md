@@ -540,6 +540,11 @@ representatives and change shading normals while every triangle position remains
 identical. Preview installs these canonical target normals so its shading matches
 reopening; it must not retain the previous normals or relax position checks.
 
+The exported `ifc_lite_geometry::MAX_TEXTURE_DIMENSION` is the shared raster edge
+limit; appearance preflight rejects invalid pixel dimensions. Embedded PNG/JPEG
+header inspection reads at most 1 MiB of encoded header bytes without copying the
+full STEP binary literal or decoding pixels.
+
 
 ---
 

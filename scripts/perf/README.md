@@ -926,3 +926,8 @@ request. Comparing two equally misconfigured routers can falsely certify empty
 georeferenced triangles or an unsliced layer-bearing product; topology equality
 alone is not proof of agreement with reopening. This context work stays on the
 opt-in planner path and does not change ordinary load callers.
+
+Embedded-header preflight reads PNG dimensions directly and walks bounded JPEG
+markers through the STEP hex bytes. It neither copies the complete compressed
+image nor allocates pixels before the plan budget is checked; ordinary raster
+decoding remains unchanged.

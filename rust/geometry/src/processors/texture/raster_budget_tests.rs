@@ -29,3 +29,29 @@ fn issue_4243_large_raster_header_is_inspected_without_allocating_its_pixels() {
     bytes.extend_from_slice(&[0,0,0,0,b'I',b'D',b'A',b'T',0x35,0xaf,0x06,0x1e]);
     assert_eq!(raster_image_dimensions(&bytes), Some((16_384, 16_384)));
 }
+
+#[test]
+fn issue_4272_header_probe_bounds_encoded_reads_and_skips_pixel_payload() {
+    use std::cell::Cell;
+    let reads = Cell::new(0usize);
+    let mut png = vec![137,80,78,71,13,10,26,10,0,0,0,13,b'I',b'H',b'D',b'R'];
+    png.extend_from_slice(&2u32.to_be_bytes());
+    png.extend_from_slice(&3u32.to_be_bytes());
+    let dimensions = super::super::raster_header::dimensions(usize::MAX, |i| {
+        reads.set(reads.get()+1);
+        assert!(i < 24, "PNG dimensions must not inspect compressed payload");
+        png.get(i).copied()
+    });
+    assert_eq!(dimensions, Some((2,3)));
+    assert!(reads.get() <= 24);
+    // A virtual JPEG containing only tiny APP segments must stop at the scan
+    // bound without allocating or reading the advertised unbounded remainder.
+    let largest = Cell::new(0usize);
+    let dimensions = super::super::raster_header::dimensions(usize::MAX, |i| {
+        largest.set(largest.get().max(i));
+        assert!(i < 1024*1024);
+        Some(match i { 0 => 0xff, 1 => 0xd8, _ => [0xff,0xe1,0,2][(i-2)%4] })
+    });
+    assert_eq!(dimensions, None);
+    assert!(largest.get() > 1024*1024-8);
+}

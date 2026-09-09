@@ -547,3 +547,20 @@ fn issue_4243_planar_uv_seam_merge_preserves_positions_and_canonical_target_shad
     }).collect();
     assert_eq!(plan.items[0].target_corner_normals, target_normals);
 }
+
+#[test]
+fn issue_4272_invalid_pixel_dimensions_fail_preflight_without_partial_plan() {
+    for dimensions in ["-1,1", "1,0", "4294967296,1", "1,16385", "$ ,1", "'bad',1"] {
+        let source = CONTROLLED_IFC.replace("#20=IFCIMAGETEXTURE(.T.,.F.,$,$,$,'textures/wood.jpg');", &format!("#20=IFCPIXELTEXTURE(.T.,.F.,$,$,$,{dimensions},3,(\"0FF0000\"));"));
+        assert!(matches!(plan_appearance(source.as_bytes(), &request(vec![10,30])), Err(reason) if reason.contains("Invalid embedded pixel texture dimensions")), "{dimensions}");
+    }
+}
+
+#[test]
+fn issue_4272_canonical_corner_validation_rejects_missing_or_overflowing_slices() {
+    let positions = [0., 0., 0., 1., 2., 3.];
+    assert_eq!(canonical::corner_position(&positions, 1).unwrap(), &[1., 2., 3.]);
+    for (buffer, index) in [(&positions[..], 2), (&positions[..], u32::MAX), (&positions[..2], 0), (&positions[..0], 0)] {
+        assert!(canonical::corner_position(buffer, index).is_err());
+    }
+}

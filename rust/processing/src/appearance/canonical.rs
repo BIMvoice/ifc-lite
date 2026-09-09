@@ -65,10 +65,9 @@ pub(super) fn align_source_corners(
             return Err("Canonical geometry changed source corner correspondence".into());
         }
         for (&a, &b) in old.indices.iter().zip(&new.indices) {
-            let a = a as usize * 3;
-            let b = b as usize * 3;
-            if old.positions.get(a..a + 3) != new.positions.get(b..b + 3)
-            {
+            let old_position = corner_position(&old.positions, a)?;
+            let new_position = corner_position(&new.positions, b)?;
+            if old_position != new_position {
                 return Err("Appearance would change canonical triangle geometry".into());
             }
         }
@@ -88,6 +87,16 @@ pub(super) fn align_source_corners(
             .collect();
     }
     Ok(())
+}
+
+/// Validate before multiplying indices, including on wasm32. Missing corners
+/// must not compare equal and then reach direct normal/UV indexing.
+pub(super) fn corner_position(positions: &[f32], index: u32) -> Result<&[f32], String> {
+    let index = index as usize;
+    if index >= positions.len() / 3 {
+        return Err("Canonical geometry produced an out-of-range corner".into());
+    }
+    Ok(&positions[index * 3..index * 3 + 3])
 }
 
 fn one_item(meshes: &[MeshData], id: u32) -> Result<&MeshData, String> {

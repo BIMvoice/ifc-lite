@@ -31,9 +31,13 @@ pub(super) fn preflight(source: &mut Source<'_>) -> Result<(), String> {
         let texture = source.entity(texture_id)?;
         let dimensions = match texture.ifc_type {
             IfcType::IfcPixelTexture => {
-                let width = texture.get(5).and_then(A::as_int).and_then(|v| u32::try_from(v).ok());
-                let height = texture.get(6).and_then(A::as_int).and_then(|v| u32::try_from(v).ok());
-                width.zip(height)
+                let dimension = |index| {
+                    texture.get(index).and_then(A::as_int)
+                        .and_then(|v| u32::try_from(v).ok())
+                        .filter(|&v| v > 0 && v <= ifc_lite_geometry::MAX_TEXTURE_DIMENSION)
+                        .ok_or_else(|| format!("{ERROR} Invalid embedded pixel texture dimensions"))
+                };
+                Some((dimension(5)?, dimension(6)?))
             }
             IfcType::IfcBlobTexture => {
                 let encoded = texture.get(6).and_then(A::as_string).ok_or("Invalid embedded raster texture")?;
