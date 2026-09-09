@@ -117,6 +117,20 @@ describe('ReDoS guard (via @ifc-lite/regex-guard)', () => {
     }
   });
 
+  it('rejects a character-class bypass of a naive (non-class-aware) scan (#4318)', () => {
+    // `[)]` is a class containing a literal `)`, not a group-closer. A guard
+    // implementation that isn't character-class aware desyncs here and
+    // never finds the real `(a+ ... a+)+` catastrophic shape underneath —
+    // this package shipped exactly that regression once, when its vendored
+    // copy of @ifc-lite/regex-guard fell behind the package's fix for
+    // #4318. Asserting the rejection here, through compileNameMatcher
+    // itself (not just inside @ifc-lite/regex-guard's own suite), means a
+    // future drift between this package's dependency and the guard's real
+    // behaviour reddens THIS package's tests, not only the guard's.
+    expect(() => compileNameMatcher('/^(a+[)]?a+)+$/')).toThrow(/catastrophic-backtracking shape/);
+    expect(() => compileNameMatcher('/(a{1,})+$/')).toThrow(/catastrophic-backtracking shape/);
+  });
+
   it('leaves every pattern in the existing corpus unrejected and matching identically', () => {
     // Both directions, mirrored against the corpus already exercised above:
     // none of these are catastrophic-shaped or over the length cap, so they
