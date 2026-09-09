@@ -10,6 +10,7 @@ export function expandAppearanceCorners(
   canonicalSourceIndices: ArrayLike<number>,
   canonicalCornerUvs: ArrayLike<number>,
   canonicalTargetIndices: ArrayLike<number>,
+  canonicalTargetCornerNormals: ArrayLike<number>,
 ): MeshData {
   const source = mesh.appearanceSource;
   if (
@@ -22,6 +23,7 @@ export function expandAppearanceCorners(
     canonicalSourceIndices.length !== source.sourceIndices.length ||
     canonicalCornerUvs.length !== source.sourceIndices.length * 2 ||
     canonicalTargetIndices.length !== source.sourceIndices.length ||
+    canonicalTargetCornerNormals.length !== source.sourceIndices.length * 3 ||
     (source.cornerIndices
       ? source.cornerIndices.length !== mesh.indices.length
       : mesh.indices.length !== source.sourceIndices.length)
@@ -62,7 +64,10 @@ export function expandAppearanceCorners(
       throw new Error('Appearance source corner index is out of range');
     for (let axis = 0; axis < 3; axis++) {
       positions[i * 3 + axis] = mesh.positions[vertex * 3 + axis];
-      normals[i * 3 + axis] = mesh.normals[vertex * 3 + axis];
+      // Canonical final weld representatives are already in renderer Y-up.
+      normals[i * 3 + axis] = canonicalTargetCornerNormals[corner * 3 + axis];
+      if (!Number.isFinite(normals[i * 3 + axis]))
+        throw new Error('Appearance normals exceed the finite renderer range');
     }
     indices[i] = i;
     uvs[i * 2] = canonicalCornerUvs[corner * 2];
@@ -81,14 +86,24 @@ export function expandAppearanceCorners(
   };
 }
 
-/** Exact triangle-corner equivalence permits welded ↔ expanded undo/redo only. */
+/** Exact triangle-corner equivalence for history validation. Normal changes are
+ * opt-in when applying canonical appearance shading; positions stay exact. */
 export function equivalentAppearanceGeometry(
   a: MeshData,
   b: MeshData,
+  options: { allowNormalChanges?: boolean } = {},
 ): boolean {
+  for (const key of ['origin', 'localToWorld'] as const) {
+    const av = a[key], bv = b[key];
+    if (av === undefined || bv === undefined) {
+      if (av !== bv) return false;
+    } else if (av.length !== bv.length || av.some((value, i) => value !== bv[i])) {
+      return false;
+    }
+  }
   if (
     a.positions === b.positions &&
-    a.normals === b.normals &&
+    (options.allowNormalChanges || a.normals === b.normals) &&
     a.indices === b.indices
   )
     return true;
@@ -117,7 +132,7 @@ export function equivalentAppearanceGeometry(
         ai >= a.normals.length ||
         bi >= b.normals.length ||
         a.positions[ai] !== b.positions[bi] ||
-        a.normals[ai] !== b.normals[bi]
+        (!options.allowNormalChanges && a.normals[ai] !== b.normals[bi])
       )
         return false;
     }

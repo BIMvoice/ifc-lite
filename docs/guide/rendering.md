@@ -70,15 +70,18 @@ animate();
 
 ## Appearance triangle mapping
 
-`expandAppearanceCorners(mesh, sourceIndices, cornerUvs, targetIndices)` binds
+`expandAppearanceCorners(mesh, sourceIndices, cornerUvs, targetIndices, targetCornerNormals)` binds
 canonical authored UVs to a mesh or streamed fragment. It validates the source
-topology against `mesh.appearanceSource`, preserves triangle positions/normals,
+topology against `mesh.appearanceSource`, preserves exact triangle positions, installs canonical target corner normals in renderer Y-up,
 and expands welded vertices when individual corners need different UVs. The
 returned mesh records the target canonical topology for a subsequent edit.
 Missing or stale provenance throws; matching array lengths alone are insufficient.
 
 `equivalentAppearanceGeometry(before, after)` checks exact triangle-corner
-equivalence, including compressed-to-expanded undo/redo. Both functions consume
+equivalence, including compressed-to-expanded undo/redo. Its default also checks
+normal equality; `{ allowNormalChanges: true }` permits canonical shading changes
+while still requiring exact positions and corner order. Validate the current
+history state with the strict default before applying such a transition. Both functions consume
 canonical planner data; they do not calculate IFC mapping rules. Callers retain
 ownership of the input arrays and must treat shared geometry/provenance arrays
 as immutable. Expansion allocates one vertex per triangle corner and is an
@@ -1040,3 +1043,10 @@ async function createViewer() {
 - [Server Guide](server.md) - Server-based rendering
 - [2D Drawing Guide](drawing-2d.md) - Generate 2D plans and elevations
 - [API Reference](../api/typescript.md) - Complete API docs
+
+Preview cancellation rejoins only partitions of the same original flat batch,
+after every related draft closes. Committed textured owners remain separate;
+undoing them can rejoin their original cohort. Restoration respects original
+vertex/index allocation bounds and current colors. If replacement allocation
+fails, split batches remain drawable and the renderer reports a warning.
+Cohort metadata is cleared when its entities or scene are removed.

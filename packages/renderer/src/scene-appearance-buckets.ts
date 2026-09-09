@@ -1,6 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import { AppearanceBatchCohorts } from './appearance-batch-cohorts.js';
+import type { AppearanceOwner } from './appearance-preview.js';
 import type { MeshData } from '@ifc-lite/geometry';
 import type { BatchedMesh } from './types.js';
 import { BATCH_CONSTANTS } from './constants.js';
@@ -28,7 +30,13 @@ export interface FlatAppearanceResource {
  * then contain exactly one owner, so another draft can cancel in any order. */
 export class AppearanceBuckets {
   private sequence = 0;
-  constructor(private readonly access: AppearanceBucketAccess) {}
+  private readonly cohorts: AppearanceBatchCohorts;
+  constructor(
+    private readonly access: AppearanceBucketAccess,
+    parts: (id: number) => readonly MeshData[] | undefined,
+  ) {
+    this.cohorts = new AppearanceBatchCohorts(parts);
+  }
   private create(
     parts: MeshData[],
     partIndices: number[],
@@ -70,6 +78,7 @@ export class AppearanceBuckets {
     const staged: FlatAppearanceResource[] = [];
     try {
       for (const [old, indices] of grouped) {
+        this.cohorts.register(old);
         const selected = new Set(indices.map((index) => parts[index]));
         const owned = this.create(
           indices.map((index) => parts[index]),
@@ -85,8 +94,13 @@ export class AppearanceBuckets {
       for (const resource of staged) this.release(resource);
       throw error;
     }
+    for (const { old, owned, rest } of replacements) {
+      this.cohorts.inherit(old, owned.bucket);
+      if (rest) this.cohorts.inherit(old, rest.bucket);
+    }
     // All allocations succeeded. Publish complete partitions, then dispose old batches.
     for (const { old, owned, rest } of replacements) {
+      this.cohorts.detach(old);
       this.access.buckets.delete(old.key);
       this.access.changed(old.key);
       for (const resource of [owned, ...(rest ? [rest] : [])])
@@ -103,20 +117,25 @@ export class AppearanceBuckets {
   ): FlatAppearanceResource[] {
     const groups = new Map<string, number[]>();
     for (const index of indices) {
-      const key = parts[index].color.join(',');
+      const cohort = this.cohorts.group(parts[index], index);
+      const key = `${parts[index].color.join(',')}#${cohort?.id ?? 'new'}`;
       const group = groups.get(key) ?? [];
       group.push(index);
       groups.set(key, group);
     }
     const resources: FlatAppearanceResource[] = [];
     try {
-      for (const group of groups.values())
-        resources.push(
-          this.create(
-            group.map((index) => parts[index]),
-            group,
-          ),
+      for (const group of groups.values()) {
+        const resource = this.create(
+          group.map((index) => parts[index]),
+          group,
         );
+        resources.push(resource);
+        this.cohorts.assign(
+          resource.bucket,
+          this.cohorts.group(parts[group[0]], group[0]),
+        );
+      }
       return resources;
     } catch (error) {
       for (const resource of resources) this.release(resource);
@@ -128,6 +147,7 @@ export class AppearanceBuckets {
       if (!bucket.meshData.some((part) => part.expressId === owner)) continue;
       if (bucket.meshData.some((part) => part.expressId !== owner))
         throw new Error('Appearance owner was not isolated');
+      this.cohorts.detach(bucket);
       this.access.buckets.delete(key);
       for (const part of bucket.meshData) this.access.reverse().delete(part);
       this.access.changed(key);
@@ -135,12 +155,34 @@ export class AppearanceBuckets {
   }
   attach(resource: FlatAppearanceResource, parts: MeshData[]): void {
     resource.bucket.meshData = parts;
+    this.cohorts.attach(resource.bucket);
     this.access.buckets.set(resource.bucket.key, resource.bucket);
     for (const part of parts) this.access.reverse().set(part, resource.bucket);
     this.access.changed(resource.bucket.key);
   }
   refresh(): void {
     this.access.refresh();
+  }
+  begin(owner: AppearanceOwner): void {
+    this.cohorts.begin(owner);
+  }
+  finish(owner: AppearanceOwner): void {
+    this.cohorts.finish(owner, (old, parts) => {
+      // Allocation failure leaves every split batch live and pickable.
+      const replacement = this.create(parts, []);
+      for (const bucket of old) {
+        this.access.buckets.delete(bucket.key);
+        this.access.changed(bucket.key);
+      }
+      this.attach(replacement, parts);
+      this.access.refresh();
+      for (const bucket of old)
+        if (bucket.batchedMesh) this.dispose(bucket.batchedMesh);
+      return replacement.bucket;
+    });
+  }
+  forget(expressId?: number): void {
+    this.cohorts.forget(expressId);
   }
   private dispose(batch: BatchedMesh): void {
     try {

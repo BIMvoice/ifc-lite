@@ -75,6 +75,9 @@ function gpu() {
     textures,
     buffers,
     failures,
+    get batchBindGroups() {
+      return batchBindGroups;
+    },
     get writes() {
       return writes;
     },
@@ -430,12 +433,77 @@ describe('flat batch appearance ownership (#4243)', () => {
     api.commit(undo);
     assert.deepEqual(ids(scene), [7, 8, 9]);
     assert.equal(scene.getTexturedMeshes().length, 0);
+    assert.equal(
+      scene.getBatchedMeshes().length,
+      1,
+      'undo rejoins the original cohort',
+    );
     const fresh = api.begin({ expressId: 7, modelIndex: 0 });
     api.cancel(first); // Old cleanup must not cancel the new owner.
     assert.doesNotThrow(() => api.commit(fresh));
     scene.clearFlatGeometry();
     assert.ok(state.buffers.every((buffer) => buffer.destroyed === 1));
     assert.ok(state.textures.every((texture) => texture.destroyed === 1));
+  });
+  it('cancel all rejoins only the original batch and failed coalescing keeps split geometry valid', (t) => {
+    const { scene, state, api } = setup();
+    const a = api.begin({ expressId: 7, modelIndex: 0 });
+    const b = api.begin({ expressId: 8, modelIndex: 0 });
+    api.cancel(b);
+    assert.equal(
+      scene.getBatchedMeshes().length,
+      3,
+      'another draft still owns a split',
+    );
+    api.cancel(a);
+    assert.equal(scene.getBatchedMeshes().length, 1);
+    assert.deepEqual(ids(scene), [7, 8, 9]);
+    const c = api.begin({ expressId: 7, modelIndex: 0 });
+    const warning = t.mock.method(console, 'warn', () => {});
+    // Fail the next batch bind group, after candidate buffers have allocated.
+    state.failures.batchBindGroupAt = state.batchBindGroups + 1;
+    api.cancel(c);
+    assert.equal(warning.mock.callCount(), 1);
+    assert.equal(scene.getBatchedMeshes().length, 2);
+    assert.deepEqual(ids(scene), [7, 8, 9]);
+    const retry = api.begin({ expressId: 7, modelIndex: 0 });
+    api.cancel(retry);
+    assert.equal(
+      scene.getBatchedMeshes().length,
+      1,
+      'a later close retries coalescing',
+    );
+    scene.clearFlatGeometry();
+    assert.ok(state.buffers.every((buffer) => buffer.destroyed === 1));
+  });
+  it('entity removal and reused IDs cannot reconnect a stale model cohort', () => {
+    const { scene, state, api, parts } = setup();
+    const removed = api.begin({ expressId: 7, modelIndex: 0 });
+    scene.removeMeshesForEntity(7);
+    api.cancel(removed);
+    const replacement = { ...parts[0], modelIndex: 2 };
+    scene.appendToBatches([replacement], state.device, pipeline);
+    assert.throws(() => api.begin({ expressId: 7, modelIndex: 0 }), /resident/);
+    const token = api.begin({ expressId: 7, modelIndex: 2 });
+    api.cancel(token);
+    assert.deepEqual(ids(scene), [7, 8, 9]);
+    const owner = scene
+      .getBatchedMeshes()
+      .flatMap((batch) =>
+        batch.expressIds.map((id, i) => [id, batch.modelIndices?.[i]]),
+      );
+    assert.deepEqual(
+      owner.find(([id]) => id === 7),
+      [7, 2],
+    );
+    scene.clearFlatGeometry();
+    assert.ok(state.buffers.every((buffer) => buffer.destroyed === 1));
+    scene.appendToBatches([replacement], state.device, pipeline);
+    const fresh = api.begin({ expressId: 7, modelIndex: 2 });
+    api.cancel(fresh);
+    assert.deepEqual(ids(scene), [7]);
+    scene.clearFlatGeometry();
+    assert.ok(state.buffers.every((buffer) => buffer.destroyed === 1));
   });
   it('textures welded corners and restores compressed geometry on undo without moving bounds', () => {
     const scene = new Scene(),
@@ -463,16 +531,22 @@ describe('flat batch appearance ownership (#4243)', () => {
       indices,
       [0, 0, 1, 0, 1, 1, 0.5, 0.5, 0.5, 1, 0, 1],
       new Uint32Array([0, 1, 2, 3, 4, 5]),
+      new Float32Array(18).fill(0.0005),
     );
     api.update(token, [
       { ...expanded, texture: mesh(0, new Uint8Array(4)).texture },
     ]);
     const change = api.commit(token);
     assert.equal(scene.getMeshDataPieces(7)![0].positions.length / 3, 6);
+    assert.deepEqual(scene.getMeshDataPieces(7)![0].normals, expanded.normals);
     assert.deepEqual(scene.getEntityBoundingBox(7), bounds);
     const undo = api.begin({ expressId: 7, modelIndex: 0 });
     api.update(undo, change.before);
     api.commit(undo);
+    assert.strictEqual(
+      scene.getMeshDataPieces(7)![0].normals,
+      original.normals,
+    );
     assert.strictEqual(
       scene.getMeshDataPieces(7)![0].indices,
       original.indices,

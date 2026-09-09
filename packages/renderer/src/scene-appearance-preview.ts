@@ -28,7 +28,9 @@ const textured = (part: MeshData) =>
 export function createSceneAppearancePreview(
   access: SceneAppearanceAccess,
 ): AppearancePreviewController<Resource> {
-  const buckets = new AppearanceBuckets(access.buckets);
+  const buckets = new AppearanceBuckets(access.buckets, (id) =>
+    access.data.get(id),
+  );
   function release(resources: readonly Resource[]) {
     for (const resource of resources) {
       try {
@@ -72,6 +74,7 @@ export function createSceneAppearancePreview(
           .capture(parts)
           .map((flat) => ({ kind: 'flat' as const, flat })),
       );
+      buckets.begin(owner);
       return { parts, resources };
     },
     stage(parts) {
@@ -126,6 +129,8 @@ export function createSceneAppearancePreview(
       access.data.set(owner.expressId, installed);
       access.invalidate(owner.expressId);
     },
+    finished: (owner) => buckets.finish(owner),
+    forget: (id) => buckets.forget(id),
     release,
   });
 }

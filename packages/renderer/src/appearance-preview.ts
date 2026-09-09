@@ -40,6 +40,8 @@ export interface AppearanceAdapter<Resource> {
     resources: readonly Resource[],
   ): void;
   release(resources: readonly Resource[]): void;
+  finished?(owner: AppearanceOwner): void;
+  forget?(expressId?: number): void;
 }
 interface Draft<Resource> {
   token: AppearanceToken;
@@ -100,10 +102,12 @@ export class AppearancePreviewController<Resource>
       if (
         p.expressId !== b.expressId ||
         p.modelIndex !== b.modelIndex ||
-        !equivalentAppearanceGeometry(p, b) ||
+        !equivalentAppearanceGeometry(p, b, { allowNormalChanges: true }) ||
         p.origin !== b.origin ||
         p.entityIds !== b.entityIds ||
-        p.geometryItemId !== b.geometryItemId
+        p.geometryItemId !== b.geometryItemId ||
+        p.normals.length !== p.positions.length ||
+        !p.normals.every(Number.isFinite)
       ) {
         throw new Error(
           'Appearance preview cannot change geometry or ownership',
@@ -169,6 +173,7 @@ export class AppearancePreviewController<Resource>
     this.adapter.install(token.owner, draft.before, draft.original);
     if (draft.current !== draft.original) this.adapter.release(draft.current);
     this.drafts.delete(token.owner.expressId);
+    this.finished(token.owner);
   }
 
   commit(token: AppearanceToken): AppearanceChange {
@@ -218,8 +223,20 @@ export class AppearancePreviewController<Resource>
           );
         }
       }
+      for (const { draft } of prepared) this.finished(draft.token.owner);
       return changes;
     };
+  }
+
+  private finished(owner: AppearanceOwner): void {
+    try {
+      this.adapter.finished?.(owner);
+    } catch (error) {
+      console.warn(
+        '[Appearance] batch restoration failed; split geometry remains active',
+        error,
+      );
+    }
   }
 
   owns(expressId: number): boolean {
@@ -234,6 +251,7 @@ export class AppearancePreviewController<Resource>
 
   /** Scene deletion/teardown invalidates tokens and releases detached originals. */
   forget(expressId?: number): void {
+    this.adapter.forget?.(expressId);
     for (const [id, draft] of this.drafts) {
       if (expressId !== undefined && expressId !== id) continue;
       if (draft.current !== draft.original)
