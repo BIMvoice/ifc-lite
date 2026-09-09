@@ -132,6 +132,33 @@ describe('compareFilterValue', () => {
       );
     });
 
+    // #4318: a character-class-blind guard reads `)` inside `[)]` as a real
+    // group-closer, desyncing its paren-depth tracking so the genuinely
+    // catastrophic `(a+ ... a+)+` shape underneath is never recognised.
+    // Measured on this pattern (subject 'a'.repeat(n) + '!'): n=22 ~18ms,
+    // n=26 ~1s, n=30 ~4s -- exponential, the same shape `^(a+)+$` is
+    // rejected for above. This module now delegates its shape check to
+    // `@ifc-lite/regex-guard`'s `hasCatastrophicBacktrackingShape`, which is
+    // character-class aware (skips from an unescaped `[` to its closing `]`
+    // without treating parens inside it as group syntax).
+    it('rejects the character-class bypass pattern before compiling, fast', () => {
+      const start = performance.now();
+      expect(() => compareFilterValue('a'.repeat(26) + '!', 'matches', '^(a+[)]?a+)+$')).toThrow(
+        /nested quantifier|exponential/i,
+      );
+      const elapsed = performance.now() - start;
+      expect(elapsed).toBeLessThan(50);
+    });
+
+    // Both directions: a pattern that merely *contains* a character class
+    // with a paren in it -- a legitimate, common shape for an IDS or list
+    // filter pattern -- must still be ACCEPTED, not rejected as if it were
+    // the bypass shape above.
+    it('still accepts a legitimate pattern containing a class with a paren', () => {
+      expect(compareFilterValue('(exterior)', 'matches', '^[(].*[)]$')).toBe(true);
+      expect(compareFilterValue('Wall-042', 'matches', '^Wall-[0-9]{3}$')).toBe(true);
+    });
+
     it('still matches ordinary patterns unaffected by the new guard', () => {
       expect(compareFilterValue('REI60', 'matches', '^REI')).toBe(true);
       expect(compareFilterValue('SomeWall', 'matches', 'Wall.*')).toBe(true);

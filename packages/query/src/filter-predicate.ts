@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { hasCatastrophicBacktrackingShape } from '@ifc-lite/regex-guard';
+
 /**
  * A `where(...)` / `--where` predicate needs to compare a stored property or
  * quantity value against a caller-supplied filter value. Three call sites
@@ -117,67 +119,31 @@ export class InvalidFilterPatternError extends Error {
  * partition the same input, and on a non-matching subject the engine tries
  * all of them before giving up.
  *
- * This is a heuristic, not a backtracking-complexity analyzer: it will
+ * Delegates to `@ifc-lite/regex-guard`'s `hasCatastrophicBacktrackingShape`
+ * rather than carrying its own copy of the scan. This module used to hand-roll
+ * a paren-depth scan here, independently of the shared guard package added
+ * for #4259 (`packages/regex-guard`) — two implementations wrong in the same
+ * way for different reasons (see #4318): this module's scan tracked `(`/`)`
+ * depth with no awareness of character classes, so a `)` written inside
+ * `[...]` (e.g. `^(a+[)]?a+)+$`) desynced the depth count and the check never
+ * fired on a genuinely catastrophic pattern. The shared guard now has the
+ * same fix (a manual scan that skips from an unescaped `[` to its closing
+ * `]`), so routing through it here closes the same bypass without
+ * maintaining a second copy.
+ *
+ * This is still a heuristic, not a backtracking-complexity analyzer: it will
  * reject some patterns that would in fact run fine (a false positive — the
  * user hits a "pattern rejected" error for a pattern that was actually
  * safe), and it will not catch every ReDoS-capable shape (e.g. overlapping
- * alternation like `(a|a)*`, or nesting split across more than two levels
- * in a way that doesn't land two quantifiers at the same depth). Given this
- * environment cannot add a linear-time regex engine (no dependency install
- * available) or move `.test()` off the main thread onto a wall-clock
- * timeout (a much larger, async-ifying change — see the PR description),
- * this heuristic plus the length cap is the practical, dependency-free
- * mitigation available; residual risk from a shape it misses is real and is
- * stated as such rather than implied away.
- *
- * Implemented as a manual bounded scan (paren-depth tracking with
- * backslash-escape awareness), not a regex against the pattern string —
- * checking an untrusted regex source for danger with another regex would
- * risk reintroducing the exact class of bug this function exists to catch.
- * Bounded by `MAX_FILTER_PATTERN_LENGTH` before this ever runs, so its
- * worst case (O(n^2) from rescanning nested groups) is cheap regardless.
+ * alternation like `(a|a)*`). Given this environment cannot add a
+ * linear-time regex engine (no dependency install available) or move
+ * `.test()` off the main thread onto a wall-clock timeout (a much larger,
+ * async-ifying change — see the PR description), this heuristic plus the
+ * length cap is the practical, dependency-free mitigation available;
+ * residual risk from a shape it misses is real and is stated as such rather
+ * than implied away. See {@link compileFilterPattern}, the sole call site.
  */
-function hasNestedQuantifier(pattern: string): boolean {
-  const isEscaped = (s: string, idx: number): boolean => {
-    let count = 0;
-    let i = idx - 1;
-    while (i >= 0 && s[i] === '\\') {
-      count++;
-      i--;
-    }
-    return count % 2 === 1;
-  };
-
-  for (let i = 0; i < pattern.length; i++) {
-    if (pattern[i] !== '(' || isEscaped(pattern, i)) continue;
-
-    let depth = 1;
-    let innerQuantified = false;
-    let j = i + 1;
-    for (; j < pattern.length && depth > 0; j++) {
-      const c = pattern[j];
-      if (c === '\\') {
-        j++; // skip the escaped character, whatever it is
-        continue;
-      }
-      if (c === '(' && !isEscaped(pattern, j)) {
-        depth++;
-        continue;
-      }
-      if (c === ')' && !isEscaped(pattern, j)) {
-        depth--;
-        continue;
-      }
-      if (depth === 1 && (c === '+' || c === '*' || c === '{')) innerQuantified = true;
-    }
-    if (depth !== 0) continue; // unbalanced -- let `new RegExp` report the syntax error
-
-    const closeIdx = j - 1; // index of this group's matching ')'
-    const after = pattern[closeIdx + 1];
-    if (innerQuantified && (after === '+' || after === '*' || after === '{')) return true;
-  }
-  return false;
-}
+const hasNestedQuantifier = hasCatastrophicBacktrackingShape;
 
 /** Bounded so a pattern this module has already validated once (the common
  * case: the same `matches` pattern is compiled once, then tested against
