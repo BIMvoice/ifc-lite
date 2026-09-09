@@ -40,6 +40,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
         uvs,
         mesh.indices,
         new Float32Array(27),
+        9,
       );
       assert.ok(equivalentAppearanceGeometry(fragment, expanded));
       assert.ok(
@@ -61,6 +62,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
       uvs,
       mesh.indices,
       new Float32Array(27),
+        9,
     );
     assert.equal(
       expanded.positions.length / 3,
@@ -83,6 +85,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
       new Float32Array(18),
       target,
       new Float32Array(27),
+        9,
     );
     assert.strictEqual(first.appearanceSource!.sourceIndices, target);
     const second = expandAppearanceCorners(
@@ -91,6 +94,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
       new Float32Array(18).fill(0.25),
       mesh.indices,
       new Float32Array(27),
+        9,
     );
     assert.ok(equivalentAppearanceGeometry(first, second));
     assert.ok(equivalentAppearanceGeometry(second, mesh));
@@ -103,6 +107,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           new Float32Array(18),
           target,
           new Float32Array(27),
+        9,
         ),
       /topology changed/,
     );
@@ -113,7 +118,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
     const fragments = splitMeshForStreaming(mesh, 3, 4096);
     for (const fragment of fragments) {
       const expanded = expandAppearanceCorners(fragment, mesh.indices,
-        new Float32Array(18), mesh.indices, targetNormals);
+        new Float32Array(18), mesh.indices, targetNormals, 4);
       assert.equal(equivalentAppearanceGeometry(fragment, expanded), false);
       assert.ok(equivalentAppearanceGeometry(fragment, expanded, { allowNormalChanges: true }));
       for (let i = 0; i < expanded.indices.length; i++) {
@@ -126,7 +131,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
     }
     for (const invalid of [new Float32Array(3), new Float32Array(27).fill(Infinity)]) {
       assert.throws(() => expandAppearanceCorners(mesh, mesh.indices,
-        new Float32Array(18), mesh.indices, invalid), /provenance|finite/);
+        new Float32Array(18), mesh.indices, invalid, 4), /provenance|finite/);
     }
   });
   it('rejects changed origin or placement even when geometry arrays are identical', () => {
@@ -140,6 +145,23 @@ describe('canonical appearance corner provenance (#4243)', () => {
     assert.ok(equivalentAppearanceGeometry(located, { ...located, origin: [0, 1, 2] }));
     assert.equal(equivalentAppearanceGeometry(located, { ...located, origin: [0, 1, 3] }), false);
   });
+  it('accepts retained unused target vertices while rejecting indices outside the actual pool', () => {
+    // Canonical Convento item187 has27 corners but references vertex27.
+    // A single triangle with an unused first vertex proves the same invariant.
+    const indices = new Uint32Array([1, 2, 3]);
+    const mesh: MeshData = { ...sourceMesh(), indices,
+      appearanceSource: { kind: 'canonical-item', indices, sourceIndices: indices } };
+    const expanded = expandAppearanceCorners(mesh, indices, new Float32Array(6),
+      indices, new Float32Array(9), 4);
+    assert.ok(equivalentAppearanceGeometry(mesh, expanded));
+    assert.deepEqual(expanded.appearanceSource!.sourceIndices, indices);
+    assert.throws(() => expandAppearanceCorners(mesh, indices, new Float32Array(6),
+      indices, new Float32Array(9), 3), /target topology/);
+    for (const invalid of [0, -1, NaN, Infinity, 4.5, 0x100000001]) {
+      assert.throws(() => expandAppearanceCorners(mesh, indices, new Float32Array(6),
+        indices, new Float32Array(9), invalid), /vertex pool/);
+    }
+  });
   it('rejects equal-size rebuilt topology, even after another streaming split', () => {
     const mesh = sourceMesh(),
       changed = { ...mesh, indices: mesh.indices.slice() };
@@ -151,6 +173,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           new Float32Array(18),
           mesh.indices,
           new Float32Array(27),
+        9,
         ),
       /provenance/,
     );
@@ -163,6 +186,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
             new Float32Array(18),
             mesh.indices,
             new Float32Array(27),
+        9,
           ),
         /provenance/,
       );
@@ -177,6 +201,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           new Float32Array(18),
           mesh.indices,
           new Float32Array(27),
+        9,
         ),
       /topology changed/,
     );
@@ -192,6 +217,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
         new Float32Array(18),
         mesh.indices,
         new Float32Array(27),
+        9,
       ).uvs!.length,
       18,
     );
@@ -203,6 +229,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           new Float32Array(6),
           mesh.indices,
           new Float32Array(27),
+        9,
         ),
       /provenance/,
     );
@@ -214,6 +241,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           new Float32Array(18).fill(Infinity),
           mesh.indices,
           new Float32Array(27),
+        9,
         ),
       /finite/,
     );
@@ -226,6 +254,7 @@ describe('canonical appearance corner provenance (#4243)', () => {
           new Float32Array(18),
           mesh.indices,
           new Float32Array(27),
+        9,
         ),
       /out of range/,
     );

@@ -11,6 +11,7 @@ export function expandAppearanceCorners(
   canonicalCornerUvs: ArrayLike<number>,
   canonicalTargetIndices: ArrayLike<number>,
   canonicalTargetCornerNormals: ArrayLike<number>,
+  canonicalTargetVertexCount: number,
 ): MeshData {
   const source = mesh.appearanceSource;
   if (
@@ -36,11 +37,13 @@ export function expandAppearanceCorners(
     if (canonicalSourceIndices[i] !== source.sourceIndices[i])
       throw new Error('Appearance canonical source topology changed');
   }
+  if (!Number.isSafeInteger(canonicalTargetVertexCount) || canonicalTargetVertexCount <= 0 || canonicalTargetVertexCount > 0x100000000)
+    throw new Error('Appearance target vertex pool is invalid');
   for (let i = 0; i < canonicalTargetIndices.length; i++) {
     if (
       !Number.isSafeInteger(canonicalTargetIndices[i]) ||
       canonicalTargetIndices[i] < 0 ||
-      canonicalTargetIndices[i] >= canonicalTargetIndices.length
+      canonicalTargetIndices[i] >= canonicalTargetVertexCount
     )
       throw new Error('Appearance target topology is invalid');
   }
