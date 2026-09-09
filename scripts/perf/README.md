@@ -951,6 +951,41 @@ allocation limits and keeps valid split batches with a reported warning if
 replacement allocation fails. The lesson is to check the post-cancel draw
 structure as well as geometry and picking: a correct image alone hid persistent
 batch fragmentation.
+### Opt-in appearance planning (#4243)
+
+Appearance planning invokes canonical mesh production for the source and planned
+styles so preview topology agrees with reopening the exported IFC. It adds no
+call to the ordinary load pipeline. Interleaved base/branch native house probes
+found unchanged ordered mesh fingerprints and no observed ordinary-load timing
+regression. This is a regression verdict, not a browser speedup claim. Keep
+projection work in a cancellable worker and bound aggregate output as well as
+input: a shared coordinate list can otherwise multiply into many UV arrays.
+
+The planner must also resolve load-time RTC and material-layer context once per
+request. Comparing two equally misconfigured routers can falsely certify empty
+georeferenced triangles or an unsliced layer-bearing product; topology equality
+alone is not proof of agreement with reopening. This context work stays on the
+opt-in planner path and does not change ordinary load callers.
+
+Embedded-header preflight reads PNG dimensions directly and walks bounded JPEG
+markers through the STEP hex bytes. It neither copies the complete compressed
+image nor allocates pixels before the plan budget is checked; ordinary raster
+decoding remains unchanged.
+
+### Effective appearance scope catalog (#4243)
+
+The optional Rust catalog shares the planner's bounded effective-source decoder
+and returns canonical product classes and type identities; it does not add a
+call to ordinary model loading. Exact source-built base and branch WASM
+distributions were compared through the actual browser worker pool in fresh,
+interleaved processes. Every geometry fingerprint matched and no material
+ordinary-load regression was observed within sample variation. This is a
+regression check, not a speedup claim or a measurement of catalog latency.
+Retain the bounded decode and shared cancellation lifecycle instead of
+reimplementing IFC type relationships in the UI. Reproduction provenance and
+samples are in `appearance-catalog-load-evidence.json`; the observation ends at
+worker-model readiness, not renderer readiness.
+
 ### Prepared-overlay comparison ownership (#4243)
 
 Compare a private borrowed overlay descriptor synchronously against the detached

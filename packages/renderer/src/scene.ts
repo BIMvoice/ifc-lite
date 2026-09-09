@@ -2102,6 +2102,8 @@ export class Scene {
     // time-sliced rebuild swaps the new batch array in.
     this.finalizeInProgress = true;
 
+    // Hoisted rollback/processChunk callbacks retain this scene across turns.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const scene = this;
     const oldFragments = this.streamingFragments;
     const oldBatches = this.batchedMeshes;

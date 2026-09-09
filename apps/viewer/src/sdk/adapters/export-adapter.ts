@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+import { packagePortableIfc, portableIfcDownload } from '../../lib/export/portable-ifc.js';
 
 import type { StoreApi } from './types.js';
 import type { EntityRef, EntityData, PropertySetData, QuantitySetData, ExportBackendMethods } from '@ifc-lite/sdk';
@@ -379,7 +380,7 @@ export function createExportAdapter(store: StoreApi): ExportBackendMethods {
         scheduleIsEdited: state.scheduleIsEdited === true,
         scheduleSourceModelId: state.scheduleSourceModelId ?? null,
       });
-      return spliced.content;
+      return packagePortableIfc(modelId, spliced.content).content;
     },
 
     download(content: string | Uint8Array, filename: string, mimeType?: string) {
@@ -399,7 +400,8 @@ export function createExportAdapter(store: StoreApi): ExportBackendMethods {
       const safe = ext
         ? buildExportFilename(stem, ext)
         : sanitizeFilename(filename, { fallback: 'export' });
-      triggerDownload(content, safe, mimeType ?? 'text/plain');
+      const portable = portableIfcDownload(content, safe, mimeType ?? 'text/plain');
+      triggerDownload(content, portable.filename, portable.mime);
       return undefined;
     },
   };
