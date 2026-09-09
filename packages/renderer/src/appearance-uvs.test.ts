@@ -129,6 +129,17 @@ describe('canonical appearance corner provenance (#4243)', () => {
         new Float32Array(18), mesh.indices, invalid), /provenance|finite/);
     }
   });
+  it('rejects changed origin or placement even when geometry arrays are identical', () => {
+    const mesh = sourceMesh();
+    for (const changed of [{ ...mesh, origin: [1, 0, 0] as [number, number, number] },
+      { ...mesh, localToWorld: [1, 0, 0, 1] }]) {
+      assert.equal(equivalentAppearanceGeometry(mesh, changed), false);
+      assert.equal(equivalentAppearanceGeometry(mesh, changed, { allowNormalChanges: true }), false);
+    }
+    const located = { ...mesh, origin: [0, 1, 2] as [number, number, number] };
+    assert.ok(equivalentAppearanceGeometry(located, { ...located, origin: [0, 1, 2] }));
+    assert.equal(equivalentAppearanceGeometry(located, { ...located, origin: [0, 1, 3] }), false);
+  });
   it('rejects equal-size rebuilt topology, even after another streaming split', () => {
     const mesh = sourceMesh(),
       changed = { ...mesh, indices: mesh.indices.slice() };

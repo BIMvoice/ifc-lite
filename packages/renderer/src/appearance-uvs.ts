@@ -93,6 +93,14 @@ export function equivalentAppearanceGeometry(
   b: MeshData,
   options: { allowNormalChanges?: boolean } = {},
 ): boolean {
+  for (const key of ['origin', 'localToWorld'] as const) {
+    const av = a[key], bv = b[key];
+    if (av === undefined || bv === undefined) {
+      if (av !== bv) return false;
+    } else if (av.length !== bv.length || av.some((value, i) => value !== bv[i])) {
+      return false;
+    }
+  }
   if (
     a.positions === b.positions &&
     (options.allowNormalChanges || a.normals === b.normals) &&
