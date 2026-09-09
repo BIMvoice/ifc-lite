@@ -52,8 +52,17 @@ describe('infoCommand table output', () => {
     await infoCommand([file]);
     const out = stdoutSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('');
 
-    expect(out).toContain('unknown');
-    expect(out).toContain('IFCNOTAREALIFCTYPE');
+    // Assert the literal unknown-classes table header, not just the word
+    // "unknown" (which the fixture's own temp dir, `ifc-info-unknown-XXXXXX`,
+    // also satisfies via the printed `File:` line) or the bare type name
+    // (which "Other types (top N)" prints too, independent of whether the
+    // drop-census unknown-classes block renders at all). Then scope the
+    // type-name check to the text *after* that header, so the assertion can
+    // only be satisfied by the table this test claims to cover.
+    const unknownHeader = 'Classes not recognised by the schema registry (unknown):';
+    expect(out).toContain(unknownHeader);
+    const afterHeader = out.slice(out.indexOf(unknownHeader) + unknownHeader.length);
+    expect(afterHeader).toContain('IFCNOTAREALIFCTYPE');
   });
 
   it('keeps unknownClasses in the --json payload (unchanged)', async () => {
