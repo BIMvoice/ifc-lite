@@ -114,4 +114,15 @@ export const TEARDOWN_EXEMPTIONS: Readonly<Record<string, string>> = {
     '— `LayersPanel.tsx` renders `layerStack` with no membership guard. Left for a follow-up ' +
     '(same shape as the splitToolSlice fix this branch makes, but in call-site wiring, not ' +
     'the teardown seam) rather than fixed here to keep this PR scoped to the registration gap.',
+
+  appearanceSlice:
+    '`appearanceDraft.modelId` is a stored session draft, not cleared on removal, but its ' +
+    'ONE read site self-heals: `useAppearancePanel.ts` computes `canResumeModel` (`!savedDraft' +
+    "?.modelId || models.has(savedDraft.modelId)`) once at mount to decide whether to resume " +
+    'the saved model at all, and every subsequent render re-derives the `modelId` actually used ' +
+    "(`chosenModel && models.has(chosenModel) ? chosenModel : activeModelId`) — the same " +
+    "`models.has` guard runs on every render, not just mount, so a model removed while the " +
+    'panel is open falls back to `activeModelId` immediately rather than reading through a ' +
+    'stale id. `appearanceSources` is a session-wide source catalog (thumbnails, no modelId ' +
+    'field) shared across models, not per-model state.',
 };
