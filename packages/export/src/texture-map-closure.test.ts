@@ -58,3 +58,31 @@ describe('inverse texture-map closure #4243', () => {
     expect(collect().has(map.expressId)).toBe(false);
   });
 });
+
+// IfcTextureMap.MappedTo accepts every IfcFace subtype, not only literal IfcFace.
+it('rescues a face-surface texture map through its EXPRESS MappedTo slot (#4243)', async () => {
+  const data = source.replace('ENDSEC;\nEND-ISO-10303-21;', `
+#30=IFCCARTESIANPOINT((0.,0.,0.));
+#31=IFCCARTESIANPOINT((1.,0.,0.));
+#32=IFCCARTESIANPOINT((0.,1.,0.));
+#33=IFCPOLYLOOP((#30,#31,#32));
+#34=IFCFACEOUTERBOUND(#33,.T.);
+#35=IFCAXIS2PLACEMENT3D(#30,$,$);
+#36=IFCPLANE(#35);
+#40=IFCFACESURFACE((#34),#36,.T.);
+#41=IFCFACESURFACE((#34),#36,.T.);
+#50=IFCTEXTUREVERTEX((0.,0.));
+#51=IFCTEXTUREVERTEX((1.,0.));
+#52=IFCTEXTUREVERTEX((0.,1.));
+#53=IFCTEXTUREMAP((#13),(#50,#51,#52),#40);
+#54=IFCTEXTUREMAP((#13),(#50,#51,#52),#41);
+ENDSEC;
+END-ISO-10303-21;`);
+  const store = await new IfcParser().parseColumnar(new TextEncoder().encode(data).buffer);
+  const closure = new Set([13, 30, 31, 32, 33, 34, 35, 36, 40]);
+  collectStyleEntities(closure, store.source, store.entityIndex);
+  expect(closure.has(53)).toBe(true);
+  expect(closure.has(50)).toBe(true);
+  expect(closure.has(54)).toBe(false);
+  expect(closure.has(41)).toBe(false);
+});

@@ -7,7 +7,6 @@ import { readEntityArgs, type EntityByteRangeIndex } from './subset-entity-reade
 import type { EffectiveEntityIndex } from './effective-index.js';
 
 export const TEXTURE_MAP_TYPES = ['IFCINDEXEDTRIANGLETEXTUREMAP', 'IFCINDEXEDPOLYGONALTEXTUREMAP', 'IFCTEXTUREMAP'] as const;
-const TARGET_TYPES = new Set(['IFCTRIANGULATEDFACESET', 'IFCPOLYGONALFACESET', 'IFCFACE']);
 
 /** #4243: rescue by MappedTo geometry, never by a shared image or UV resource.
  * Effective reference groups replace overridden targets; refsOf intentionally
@@ -20,12 +19,10 @@ export function textureMapTarget(
 ): number | undefined {
   const sourceGroups = readEntityArgs({ source: asSourceBytes(source) }, index, expressId)?.args.map(refGroupFromArg);
   const groups = index.refGroupsOf?.(expressId, sourceGroups) ?? sourceGroups ?? [];
-  // Maps/Vertices point only to texture resources; MappedTo is the unique
-  // face/face-set reference. This also handles IFC2X3 IfcTextureMap's slot.
-  for (const group of groups) {
-    if (typeof group !== 'number') continue;
-    const type = index.get(group)?.type?.toUpperCase();
-    if (type && TARGET_TYPES.has(type)) return group;
-  }
-  return undefined;
+  // EXPRESS places MappedTo after inherited Maps (indexed maps), or after
+  // Maps and Vertices (IfcTextureMap). Do not narrow its IfcFace target by
+  // concrete type: IfcFaceSurface and IfcAdvancedFace are valid targets too.
+  const type = index.get(expressId)?.type?.toUpperCase();
+  const target = groups[type === 'IFCTEXTUREMAP' ? 2 : 1];
+  return typeof target === 'number' ? target : undefined;
 }
