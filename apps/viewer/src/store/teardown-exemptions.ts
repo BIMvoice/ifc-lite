@@ -116,13 +116,29 @@ export const TEARDOWN_EXEMPTIONS: Readonly<Record<string, string>> = {
     'the teardown seam) rather than fixed here to keep this PR scoped to the registration gap.',
 
   appearanceSlice:
-    '`appearanceDraft.modelId` is a stored session draft, not cleared on removal, but its ' +
-    'ONE read site self-heals: `useAppearancePanel.ts` computes `canResumeModel` (`!savedDraft' +
+    'Verified 2026-09-09 field by field against `AppearanceDraftRecipe` (lib/appearance/draft-' +
+    'types.ts): `sourceId`, `settings` and `previewEnabled` name no modelId or expressId; only ' +
+    '`appearanceDraft.modelId` is per-model, and it has exactly ONE read site across the repo. ' +
+    'That site self-heals: `useAppearancePanel.ts` computes `canResumeModel` (`!savedDraft' +
     "?.modelId || models.has(savedDraft.modelId)`) once at mount to decide whether to resume " +
     'the saved model at all, and every subsequent render re-derives the `modelId` actually used ' +
     "(`chosenModel && models.has(chosenModel) ? chosenModel : activeModelId`) — the same " +
     "`models.has` guard runs on every render, not just mount, so a model removed while the " +
     'panel is open falls back to `activeModelId` immediately rather than reading through a ' +
-    'stale id. `appearanceSources` is a session-wide source catalog (thumbnails, no modelId ' +
-    'field) shared across models, not per-model state.',
+    "stale id. `scope`'s `typeId` (also per-model, an express id) is React `useState`, not " +
+    "store state, and is only ever SEEDED from `savedDraft.scope` when `canResumeModel` is " +
+    'true, i.e. the same model — it cannot carry a stale id from a different model into this ' +
+    'field either. `appearanceSources` is a session-wide source catalog (thumbnails, no ' +
+    'modelId field) shared across models — every entry is added by `upload()` from a user ' +
+    'file, never from a loaded model\'s embedded resources, so it cannot pick up per-model ' +
+    'data by another route. Neither field is written to localStorage, a collab message, or ' +
+    'an export payload (no `persist`/`partialize` wraps this store; grepped `lib/collab` and ' +
+    "`lib/export` for both field names — no hits). The image BYTES this feature retains " +
+    '(archive-embedded and uploaded originals, decoded bitmaps) live in the separate ' +
+    '`modelAppearanceAssets` / `appearanceAssets` registries (lib/appearance/model-assets.ts), ' +
+    "not in this slice's Zustand state, and that registry already has its own explicit " +
+    "teardown at both model-lifecycle sites (`modelSlice.ts`'s `removeModel` calls " +
+    '`modelAppearanceAssets.remove(modelId)`, `clearAllModels` calls ' +
+    '`modelAppearanceAssets.clear()`) — outside the scope of this guard, but confirmed so the ' +
+    'exemption above is not silently relying on it.',
 };
