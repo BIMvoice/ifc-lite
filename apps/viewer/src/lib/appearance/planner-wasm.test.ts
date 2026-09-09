@@ -57,6 +57,7 @@ test('actual WASM worker function plans source-corner UVs and survives rejected 
   assert.deepEqual(result.removed, [22]);
   assert.deepEqual(result.exclusions, []);
   assert.equal(result.items[0].geometryItemId, 14);
+  assert.equal(result.items[0].targetVertexCount, 3);
   assert.deepEqual(result.items[0].texCoords, [[0.25, 0.5], [2.25, 0.5], [0.25, 3.5]]);
   assert.deepEqual(result.items[0].previewCornerUvs, [0.25, 0.5, 2.25, 0.5, 0.25, -2.5]);
   // The IFC +Z triangle normal must arrive in the renderer +Y frame.

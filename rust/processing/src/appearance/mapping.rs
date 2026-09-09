@@ -263,6 +263,7 @@ pub(super) fn map_item(
         tex_coord_index,
         source_indices: Vec::new(),
         target_indices: Vec::new(),
+        target_vertex_count: 0,
         preview_corner_uvs: Vec::new(),
         target_corner_normals: Vec::new(),
     })

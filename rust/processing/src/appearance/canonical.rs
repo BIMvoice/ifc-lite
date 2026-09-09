@@ -80,6 +80,7 @@ pub(super) fn align_source_corners(
         }).collect();
         item.source_indices.clone_from(&old.indices);
         item.target_indices.clone_from(&new.indices);
+        item.target_vertex_count = new.positions.len() / 3;
         item.preview_corner_uvs = new
             .indices
             .iter()
