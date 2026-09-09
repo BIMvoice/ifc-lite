@@ -1164,6 +1164,9 @@ importers:
       '@ifc-lite/encoding':
         specifier: workspace:*
         version: link:../encoding
+      '@ifc-lite/regex-guard':
+        specifier: workspace:*
+        version: link:../regex-guard
     devDependencies:
       csv-parse:
         specifier: 7.0.2
