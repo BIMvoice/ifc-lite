@@ -187,6 +187,7 @@
     "compute_signed_area": "unresolved (not a local struct/enum — fn/const/trait/type or unknown)",
     "count_attributed_products": "unresolved (not a local struct/enum — fn/const/trait/type or unknown)",
     "decode_instanced": "unresolved (not a local struct/enum — fn/const/trait/type or unknown)",
+    "embedded_raster_dimensions": "unresolved (not a local struct/enum — fn/const/trait/type or unknown)",
     "encode_instanced": "unresolved (not a local struct/enum — fn/const/trait/type or unknown)",
     "encode_refs": "unresolved (not a local struct/enum — fn/const/trait/type or unknown)",
     "ensure_ccw": "unresolved (not a local struct/enum — fn/const/trait/type or unknown)",

@@ -481,6 +481,10 @@ into the final deduplication key. The native processing pipeline manages this li
 
 Other notable re-exports: `orient_mesh_outward`, `calculate_normals`, `ClippingProcessor`, `Plane`, `Triangle` (CSG), `hash_mesh_world` / `GeometryHasher` (geometry-diff hashing), instancing encode/decode helpers, and the nalgebra types `Point2`, `Point3`, `Vector2`, `Vector3`.
 
+`embedded_raster_dimensions(step_binary)` returns optional PNG/JPEG dimensions
+from an IFC binary literal without decoding pixels. It supports allocation
+preflight; a readable header does not certify a complete or valid image stream.
+
 ---
 
 ## ifc-lite-processing
@@ -509,6 +513,21 @@ pub use types::mesh::{InstanceRecord, MeshData, RawInstanceOccurrence};
 pub use types::response::{CoordinateInfo, ModelMetadata, ParseResponse, ProcessingStats};
 pub use parallel_scan::build_entity_index_parallel;
 ```
+
+### Appearance authoring
+
+`ifc_lite_processing::appearance::plan_appearance` prepares image and UV edits
+against an effective IFC STEP snapshot. It shares canonical geometry production
+with loading and returns both IFC edit operations and per-corner preview data.
+It does not mutate the input. `AppearanceRequest` supplies an IFC4/IFC4X3 schema,
+revision token, reserved allocator watermark, product IDs, relative image URI
+and an existing-UV, planar or box mapping. The initial scope is direct, unshared
+`IfcTriangulatedFaceSet` Body geometry. Plans report unsupported products;
+callers must explicitly accept a reduced scope, retain image resources and
+apply the complete IFC edit plan atomically after revalidating the revision and
+allocator. Preview consumers validate source topology and map triangle corners,
+rather than assuming vertex counts establish UV correspondence.
+
 
 ---
 

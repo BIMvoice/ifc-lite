@@ -150,3 +150,30 @@ pub(super) fn decode_raster_image(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     }
     None
 }
+
+/// Inspect supported raster headers without decoding pixel buffers. Hosts that
+/// aggregate many embedded images can budget their allocations before decoding.
+/// A successful header read does not certify the compressed pixel stream.
+pub fn embedded_raster_dimensions(step_binary: &str) -> Option<(u32, u32)> {
+    raster_image_dimensions(&decode_step_binary(step_binary))
+}
+
+fn raster_image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]) {
+        let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+        let reader = decoder.read_info().ok()?;
+        let info = reader.info();
+        return Some((info.width, info.height));
+    }
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        let mut decoder = jpeg_decoder::Decoder::new(bytes);
+        decoder.read_info().ok()?;
+        let info = decoder.info()?;
+        return Some((u32::from(info.width), u32::from(info.height)));
+    }
+    None
+}
+
+#[cfg(test)]
+#[path = "raster_budget_tests.rs"]
+mod budget_tests;

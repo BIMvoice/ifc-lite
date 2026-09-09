@@ -910,3 +910,13 @@ distributions directly to the TypeScript entrypoint and retain their provenance.
 `--skip-branch-build` labels its input as supplied distribution, not a verified
 current-commit build. The wrapper retains the temporary base through child exit
 and then removes it while preserving the child failure status.
+
+### Opt-in appearance planning (#4243)
+
+Appearance planning invokes canonical mesh production for the source and planned
+styles so preview topology agrees with reopening the exported IFC. It adds no
+call to the ordinary load pipeline. Interleaved base/branch native house probes
+found unchanged ordered mesh fingerprints and no observed ordinary-load timing
+regression. This is a regression verdict, not a browser speedup claim. Keep
+projection work in a cancellable worker and bound aggregate output as well as
+input: a shared coordinate list can otherwise multiply into many UV arrays.
