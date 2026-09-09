@@ -61,6 +61,21 @@
  * ghosted-but-not-hidden entity is still on screen and must still export;
  * folding it in here would make "Export Visible Only" drop entities the user
  * can currently see.
+ *
+ * ## Every export path routes through this — with one deliberate exception
+ * STEP, IFCX, merged STEP and GLB (`ExportDialog.tsx`, `GLBExportDialog.tsx`)
+ * call this resolver directly. The SDK/scripting surface
+ * (`sdk.export.ifc()`, `export-adapter.ts`'s `resolveVisibilityFilterSets`)
+ * routes through it too, but ONLY when the caller's `refs` cover the whole
+ * model — that is the same "visible only" question this resolver answers
+ * for the dialogs. When a caller instead passes an explicit SUBSET of refs
+ * (`sdk.export.ifc([wallA, wallB], ...)`), that adapter deliberately does
+ * NOT consult this resolver: an explicit selection is a different question
+ * ("export exactly these entities") than "what does visible-only mean for
+ * the whole model", and must not be broadened or narrowed by whatever the
+ * Class tab or storey isolation happen to be set to. See
+ * `resolveVisibilityFilterSets`'s own doc in `export-adapter.ts` for that
+ * composition.
  */
 
 import { buildHiddenIfcTypes } from './typeVisibilityFilter.js';
@@ -115,9 +130,12 @@ function collectHiddenIdsByType(
 /**
  * Resolve the effective visible/hidden entity set for `modelId` from EVERY
  * visibility channel the store carries, in both local (STEP/IFCX) and
- * global (GLB) id space. The one function every export path (STEP, IFCX,
- * merged STEP, GLB) must route through — see module doc for the composition
- * and structural-entity rulings.
+ * global (GLB) id space. STEP, IFCX, merged STEP and GLB (the dialog export
+ * paths) route through this unconditionally; the SDK/scripting path
+ * (`sdk.export.ifc()`) routes through it whenever the caller's refs cover
+ * the whole model, but takes a deliberately different path for an explicit
+ * ref subset — see module doc's "Every export path routes through this"
+ * section for why, and the composition/structural-entity rulings.
  */
 export function resolveExportVisibility(
   state: ViewerStateSnapshot,

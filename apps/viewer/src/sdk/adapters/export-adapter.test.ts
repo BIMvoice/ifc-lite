@@ -3,26 +3,31 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import test from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveVisibilityFilterSets, injectScheduleIntoStep, createExportAdapter } from './export-adapter.js';
 import { LEGACY_MODEL_ID } from './model-compat.js';
 import type { StoreApi } from './types.js';
 import type { ScheduleExtraction, IfcDataStore } from '@ifc-lite/parser';
+import { asSourceBytes } from '@ifc-lite/parser';
+import { useViewerStore } from '../../store/index.js';
 
-test('resolveVisibilityFilterSets honors legacy single-model hidden and isolated state', () => {
-  const state = {
+test('resolveVisibilityFilterSets honors legacy single-model hidden and isolated state (routed through resolveExportVisibility, #4333 follow-up)', () => {
+  useViewerStore.getState().resetViewerState();
+  useViewerStore.setState({
     models: new Map(),
     hiddenEntities: new Set([11, 12]),
     isolatedEntities: new Set([21, 22]),
     hiddenEntitiesByModel: new Map(),
     isolatedEntitiesByModel: new Map(),
-  };
+    classFilter: null,
+  });
 
-  const result = resolveVisibilityFilterSets(state as never, LEGACY_MODEL_ID, new Set([1, 2, 3]), 3);
+  const result = resolveVisibilityFilterSets(useViewerStore.getState(), LEGACY_MODEL_ID, new Set([1, 2, 3]), 3);
 
   assert.equal(result.visibleOnly, false);
-  assert.deepEqual([...result.hiddenEntityIds], [11, 12]);
-  assert.deepEqual(result.isolatedEntityIds ? [...result.isolatedEntityIds] : null, [21, 22]);
+  assert.deepEqual([...result.hiddenEntityIds].sort(), [11, 12]);
+  assert.deepEqual(result.isolatedEntityIds ? [...result.isolatedEntityIds].sort() : null, [21, 22]);
 });
 
 // ─── injectScheduleIntoStep ─────────────────────────────────────────────
@@ -567,4 +572,147 @@ test('export.csv escapeCsv quotes a value containing a newline', () => {
   const adapter = createExportAdapter(makeCsvFixtureStore({ 1: 'Line1\nLine2' }));
   const out = adapter.csv([{ modelId: LEGACY_MODEL_ID, expressId: 1 }], { columns: ['Name'] }) as string;
   assert.equal(out, 'Name\n"Line1\nLine2"');
+});
+
+// ─── sdk.export.ifc() must honor the Class-tab filter (#4328 follow-up) ──
+//
+// #4333 fixed the dialog paths (ExportDialog/GLBExportDialog) by routing
+// them through `resolveExportVisibility`, the single resolver that combines
+// hidden/isolated state with `classFilter` (Class tab), `selectedStoreys`,
+// and `typeVisibility`. This adapter's own `resolveVisibilityFilterSets`
+// was left untouched — it only ever read `hiddenEntitiesByModel` /
+// `isolatedEntitiesByModel` (plus the legacy globals) and never `classFilter`
+// at all, so `sdk.export.ifc(refs, { visibleOnly: true })` still reproduced
+// the original #4328 bug for the scripting/extension surface: filter the
+// Class tab to `IfcWallStandardCase` and the whole model still comes out.
+
+type MockEntityRef = {
+  expressId: number;
+  type: string;
+  byteOffset: number;
+  byteLength: number;
+  lineNumber: number;
+};
+
+/** Same synthetic-store shape `exportVisibility.classfilter-e2e.test.ts` uses. */
+function buildParsedStore(entries: Array<[number, string, string]>): IfcDataStore {
+  const encoder = new TextEncoder();
+  const parts: Uint8Array[] = [];
+  const byId = new Map<number, MockEntityRef>();
+  const byType = new Map<string, number[]>();
+  let offset = 0;
+
+  for (const [id, type, text] of entries) {
+    const encoded = encoder.encode(text);
+    const upper = type.toUpperCase();
+    byId.set(id, { expressId: id, type: upper, byteOffset: offset, byteLength: encoded.byteLength, lineNumber: 0 });
+    if (!byType.has(upper)) byType.set(upper, []);
+    byType.get(upper)!.push(id);
+    parts.push(encoded);
+    offset += encoded.byteLength;
+  }
+
+  const source = new Uint8Array(offset);
+  let position = 0;
+  for (const part of parts) {
+    source.set(part, position);
+    position += part.byteLength;
+  }
+
+  return {
+    fileSize: offset,
+    schemaVersion: 'IFC4',
+    entityCount: entries.length,
+    parseTime: 0,
+    source: asSourceBytes(source),
+    entityIndex: { byId, byType },
+  } as unknown as IfcDataStore;
+}
+
+const PROJECT = "#1=IFCPROJECT('0proj0000000000000000',$,'P',$,$,$,$,$,$);\n";
+const STOREY = "#2=IFCBUILDINGSTOREY('0stor0000000000000000',$,'S',$,$,$,$,$,$,0.);\n";
+const WALL = "#3=IFCWALLSTANDARDCASE('0wall0000000000000000',$,'Wall',$,$,$,$,$);\n";
+const DOOR = "#4=IFCDOOR('0door0000000000000000',$,'Door',$,$,$,$,$,$,$,$);\n";
+
+/** `adapter.ifc()` returns `string | Uint8Array` depending on caller
+ *  option — decode to a plain string for content assertions either way. */
+function decodeIfcOutput(out: string | Uint8Array): string {
+  return typeof out === 'string' ? out : new TextDecoder().decode(out);
+}
+
+function buildFourEntityStore(): IfcDataStore {
+  return buildParsedStore([
+    [1, 'IFCPROJECT', PROJECT],
+    [2, 'IFCBUILDINGSTOREY', STOREY],
+    [3, 'IFCWALLSTANDARDCASE', WALL],
+    [4, 'IFCDOOR', DOOR],
+  ]);
+}
+
+describe('sdk.export.ifc() must honor classFilter when refs cover the whole model (#4328)', () => {
+  beforeEach(() => {
+    useViewerStore.getState().resetViewerState();
+  });
+
+  it('classFilter=IfcWallStandardCase + visibleOnly + all-model refs -> only the wall (plus structural scaffolding) is exported', () => {
+    const dataStore = buildFourEntityStore();
+    useViewerStore.setState({
+      models: new Map(),
+      ifcDataStore: dataStore,
+      hiddenEntities: new Set(),
+      isolatedEntities: null,
+      classFilter: { ids: new Set([3]), label: 'IfcWallStandardCase' },
+    });
+
+    const adapter = createExportAdapter(useViewerStore as unknown as StoreApi);
+    const allRefs = [1, 2, 3, 4].map((expressId) => ({ modelId: LEGACY_MODEL_ID, expressId }));
+    const out = decodeIfcOutput(adapter.ifc(allRefs, { visibleOnly: true }));
+
+    assert.ok(out.includes('IFCPROJECT'), 'IfcProject must survive visibleOnly (structural scaffolding)');
+    assert.ok(out.includes('IFCBUILDINGSTOREY'), 'IfcBuildingStorey must survive visibleOnly (structural scaffolding)');
+    assert.ok(out.includes('IFCWALLSTANDARDCASE'), 'the class-filtered wall must be exported');
+    assert.ok(!out.includes('IFCDOOR'), '#4328: the door excluded by the class filter must NOT be exported');
+  });
+
+  it('no filter active + visibleOnly + all-model refs -> full export, unchanged (both directions)', () => {
+    const dataStore = buildFourEntityStore();
+    useViewerStore.setState({
+      models: new Map(),
+      ifcDataStore: dataStore,
+      hiddenEntities: new Set(),
+      isolatedEntities: null,
+      classFilter: null,
+    });
+
+    const adapter = createExportAdapter(useViewerStore as unknown as StoreApi);
+    const allRefs = [1, 2, 3, 4].map((expressId) => ({ modelId: LEGACY_MODEL_ID, expressId }));
+    const out = decodeIfcOutput(adapter.ifc(allRefs, { visibleOnly: true }));
+
+    assert.ok(out.includes('IFCPROJECT'));
+    assert.ok(out.includes('IFCBUILDINGSTOREY'));
+    assert.ok(out.includes('IFCWALLSTANDARDCASE'), 'no filter must not drop the wall');
+    assert.ok(out.includes('IFCDOOR'), 'no filter must not drop the door either');
+  });
+
+  it('explicit refs (a subset) win over an active classFilter — selection-limiting is unaffected', () => {
+    const dataStore = buildFourEntityStore();
+    useViewerStore.setState({
+      models: new Map(),
+      ifcDataStore: dataStore,
+      hiddenEntities: new Set(),
+      isolatedEntities: null,
+      // Class filter says "only walls" — but the caller explicitly asked
+      // for the door (id 4). An explicit selection must not be narrowed
+      // (or broadened) by a filter the caller never mentioned.
+      classFilter: { ids: new Set([3]), label: 'IfcWallStandardCase' },
+    });
+
+    const adapter = createExportAdapter(useViewerStore as unknown as StoreApi);
+    // Explicit subset: just the door. entityCount is 4, so this is < 4 and
+    // hits the "shouldLimitToSelection" branch — untouched by this fix.
+    const doorRef = [{ modelId: LEGACY_MODEL_ID, expressId: 4 }];
+    const out = decodeIfcOutput(adapter.ifc(doorRef, {}));
+
+    assert.ok(out.includes('IFCDOOR'), 'explicitly-requested door must be exported despite the class filter');
+  });
 });

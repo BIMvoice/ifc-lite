@@ -6,11 +6,12 @@ import type { StoreApi } from './types.js';
 import type { EntityRef, EntityData, PropertySetData, QuantitySetData, ExportBackendMethods } from '@ifc-lite/sdk';
 import { EntityNode, findPropertyInSets, findQuantityInSets } from '@ifc-lite/query';
 import { escapeCsvCell, StepExporter, type StepExportOptions } from '@ifc-lite/export';
-import { getModelForRef, LEGACY_MODEL_ID } from './model-compat.js';
+import { getModelForRef } from './model-compat.js';
 import { applyAttributeMutationsToEntityData, getMutationViewForModel } from './mutation-view.js';
 import { serializeScheduleToStep, type ScheduleExtraction, type IfcDataStore } from '@ifc-lite/parser';
 import { spliceScheduleIntoExport } from './export-schedule-splice.js';
 import { downloadFile, sanitizeFilename, buildExportFilename } from '../../lib/export/download.js';
+import { resolveExportVisibility } from '../../store/exportVisibility.js';
 
 /** Options for CSV export */
 interface CsvOptions {
@@ -82,25 +83,30 @@ function normalizeRefs(raw: unknown[]): EntityRef[] {
   });
 }
 
+/**
+ * Resolve `sdk.export.ifc()` visibility filters. A subset `refs` (< model
+ * entity count) means the caller named exactly what they want: isolate to
+ * `selectedExpressIds`, skip every visibility channel. A full-model `refs`
+ * means "visible only" per the current viewer state, so this routes through
+ * `resolveExportVisibility()` — the same resolver ExportDialog/
+ * GLBExportDialog use — so `classFilter`/`selectedStoreys`/`typeVisibility`
+ * are honored here too (previously only `hiddenEntitiesByModel`/
+ * `isolatedEntitiesByModel` were read — this surface reproduced #4328). */
 export function resolveVisibilityFilterSets(
   state: StoreApi['getState'] extends () => infer T ? T : never,
   modelId: string,
   selectedExpressIds: Set<number>,
   entityCount: number,
 ): { visibleOnly: boolean; hiddenEntityIds: Set<number>; isolatedEntityIds: Set<number> | null } {
-  const shouldLimitToSelection = selectedExpressIds.size < entityCount;
-  const isLegacyModel = state.models.size === 0 && (modelId === LEGACY_MODEL_ID || modelId === 'legacy');
-  const modelHidden = state.hiddenEntitiesByModel.get(modelId) ?? (isLegacyModel ? state.hiddenEntities : undefined);
-  const modelIsolated = state.isolatedEntitiesByModel.get(modelId) ?? (isLegacyModel ? state.isolatedEntities : null);
+  if (selectedExpressIds.size < entityCount) {
+    return { visibleOnly: true, hiddenEntityIds: new Set<number>(), isolatedEntityIds: selectedExpressIds };
+  }
 
+  const visibility = resolveExportVisibility(state, modelId);
   return {
-    visibleOnly: shouldLimitToSelection,
-    hiddenEntityIds: shouldLimitToSelection
-      ? new Set<number>()
-      : new Set<number>(modelHidden ?? []),
-    isolatedEntityIds: shouldLimitToSelection
-      ? selectedExpressIds
-      : modelIsolated,
+    visibleOnly: false,
+    hiddenEntityIds: visibility.hiddenLocalIds,
+    isolatedEntityIds: visibility.isolatedLocalIds,
   };
 }
 
