@@ -26,7 +26,7 @@ export function planAuthoredResourceCleanup(
   const candidates = new Set([...candidateIds].filter(id => index.isOverlayCreated(id)
     && !index.isDeleted(id) && RESOURCE_TYPES.has(index.typeOf(id) ?? '')));
   const live = new Set<number>();
-  const outgoing = new Map<number, number[]>();
+  const pending: number[] = [];
   let work = 0;
   const account = () => { if (++work > 2_000_000) throw new Error('Authored appearance cleanup exceeds its reference budget; resources were retained.'); };
   let valueWork = 0, stringUnits = 0;
@@ -48,7 +48,10 @@ export function planAuthoredResourceCleanup(
       }
     }
   };
-  const retain = (id: number) => { account(); if (candidates.has(id)) live.add(id); };
+  const retain = (id: number) => {
+    account();
+    if (candidates.has(id) && !live.has(id)) { live.add(id); pending.push(id); }
+  };
   if (candidates.size) for (const value of protectedValues) {
     inspect(value);
     for (const id of authoredEntityRefs(value)) retain(id);
@@ -62,8 +65,18 @@ export function planAuthoredResourceCleanup(
       const record = index.get(id); if (record) yield [id, record] as const;
     }
   };
+  // Non-candidates are roots. Visit candidates only after a live reference
+  // reaches them: unreachable history UV arrays need neither serialization nor
+  // recursive validation to prove that no surviving entity can refer to them.
+  const graphRecords = function* () {
+    for (const entry of index) if (!candidates.has(entry[0])) yield entry;
+    for (let cursor = 0; cursor < pending.length; cursor++) {
+      const id = pending[cursor], record = index.get(id);
+      if (record) yield [id, record] as const;
+    }
+  };
   let sourceBytes = 0, sourceHashes = 0, emittedBytes = 0, emittedHashes = 0;
-  for (const [entityId, record] of needsGraph ? index : imageRecords()) {
+  for (const [entityId, record] of needsGraph ? graphRecords() : imageRecords()) {
     account();
     inspect(view.getNewEntity(entityId)?.attributes);
     for (const value of view.getPositionalMutationsForEntity(entityId)?.values() ?? []) inspect(value);
@@ -96,23 +109,14 @@ export function planAuthoredResourceCleanup(
       throw new Error('Authored appearance cleanup exceeds its reference budget; resources were retained.');
     }
     const groups = needsGraph ? collectRefsInByteRange(bytes, 0, bytes.length) : [];
-    const refs: number[] = [];
     for (const group of groups) {
       for (const id of typeof group === 'number' ? [group] : group) {
-        account(); if (candidates.has(id)) refs.push(id);
+        retain(id);
       }
     }
-    if (candidates.has(entityId)) outgoing.set(entityId, refs);
-    else for (const id of refs) retain(id);
     // Binding entities are intentionally never deletion candidates: their live
     // inverse link to geometry roots the style/map resources they still name.
     // Keeping an unbound binding is conservative and cannot break other edits.
-  }
-  const pending = [...live];
-  for (let cursor = 0; cursor < pending.length; cursor++) {
-    for (const id of outgoing.get(pending[cursor]) ?? []) {
-      account(); if (!live.has(id)) { live.add(id); pending.push(id); }
-    }
   }
   const entityIds = new Set([...candidates].filter(id => !live.has(id)));
   return { entityIds, retainedImageUris: new Set([...imageUris].filter(([id]) => !entityIds.has(id)).map(([, uri]) => uri)) };
